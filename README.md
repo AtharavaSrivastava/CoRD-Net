@@ -250,8 +250,7 @@ pip install torch torchvision opencv-python Pillow numpy
 - **One backbone**: `DRPNet` holds exactly one `ConvNeXt-tiny` instance.
   Compartment branches, DRP, PGR, and RTC all receive feature maps from it —
   no duplicate weights, no second forward pass.
-- **Config-driven**: every hyperparameter lives in `config.py` dataclasses;
-  no magic numbers in model or training code.
+- **Config-driven**: every hyperparameter lives in `config.py` dataclasses
 - **Single responsibility**: losses in `losses.py`, training logic in
   `trainer.py`, model modules each in their own file.
 - **Prototype encapsulation**: EMA updates go through `model.update_prototypes()`
