@@ -1,0 +1,71 @@
+2026-06-19 10:02:47 | INFO     | utils | Logging to logs/e2.log
+2026-06-19 10:02:47 | INFO     | __main__ | CoRD-Net Ablation Suite | device=auto | batch=2 | steps=1
+2026-06-19 10:02:47 | INFO     | __main__ | 
+2026-06-19 10:02:47 | INFO     | __main__ | ==============================================================
+2026-06-19 10:02:47 | INFO     | __main__ |   E2 — ConvNeXt + Auto-Localization (STN)
+2026-06-19 10:02:47 | INFO     | __main__ | ==============================================================
+2026-06-19 10:02:50 | INFO     | trainer | Trainer ready | experiment=e2 | device=cpu | params=30,738,475
+2026-06-19 10:02:50 | ERROR    | __main__ |   E2 FAILED
+Traceback (most recent call last):
+  File "/home/claude/CoRD-Net/run_experiment.py", line 103, in main
+    run_one(exp, args)
+  File "/home/claude/CoRD-Net/run_experiment.py", line 68, in run_one
+    last = trainer.stub_fit(steps=args.steps, image_size=image_size)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/claude/CoRD-Net/trainer.py", line 326, in stub_fit
+    preds     = self.model(g, m, l)
+                ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/claude/CoRD-Net/models/drpnet.py", line 241, in forward
+    global_crop, theta = self.localizer(global_crop)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/claude/CoRD-Net/models/localization.py", line 82, in forward
+    xs = self.loc_net(x).flatten(1)
+         ^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/conv.py", line 565, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/conv.py", line 560, in _conv_forward
+    return F.conv2d(
+           ^^^^^^^^^
+RuntimeError: Given groups=1, weight of size [32, 1, 7, 7], expected input[2, 3, 224, 224] to have 1 channels, but got 3 channels instead
+2026-06-19 10:03:19 | INFO     | utils | Logging to logs/e2.log
+2026-06-19 10:03:19 | INFO     | __main__ | CoRD-Net Ablation Suite | device=auto | batch=4 | steps=2
+2026-06-19 10:03:19 | INFO     | __main__ | 
+2026-06-19 10:03:19 | INFO     | __main__ | ==============================================================
+2026-06-19 10:03:19 | INFO     | __main__ |   E2 — ConvNeXt + Auto-Localization (STN)
+2026-06-19 10:03:19 | INFO     | __main__ | ==============================================================
+2026-06-19 10:03:20 | INFO     | trainer | Trainer ready | experiment=e2 | device=cpu | params=30,738,475
+2026-06-19 10:03:28 | INFO     | trainer |   step 1/2  kl=1.6252 | total=1.6252
+2026-06-19 10:03:32 | INFO     | trainer |   step 2/2  kl=1.6104 | total=1.6104
+2026-06-19 10:03:32 | INFO     | __main__ |   E2 PASS ✓  final total=1.6104
+2026-06-19 10:03:32 | INFO     | __main__ | 
+2026-06-19 10:03:32 | INFO     | __main__ | ==============================================================
+2026-06-19 10:03:32 | INFO     | __main__ |   Done — 1 experiment(s) passed ✓
+2026-06-19 10:03:32 | INFO     | __main__ | ==============================================================

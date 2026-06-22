@@ -1,0 +1,14 @@
+2026-06-19 10:04:40 | INFO     | utils | Logging to logs/e8.log
+2026-06-19 10:04:40 | INFO     | __main__ | CoRD-Net Ablation Suite | device=auto | batch=2 | steps=2
+2026-06-19 10:04:40 | INFO     | __main__ | 
+2026-06-19 10:04:40 | INFO     | __main__ | ==============================================================
+2026-06-19 10:04:40 | INFO     | __main__ |   E8 — Full DRP + Auxiliary Heads
+2026-06-19 10:04:40 | INFO     | __main__ | ==============================================================
+2026-06-19 10:04:41 | INFO     | trainer | Trainer ready | experiment=e8 | device=cpu | params=34,548,794
+2026-06-19 10:04:44 | INFO     | trainer |   step 1/2  kl=1.4150 | coral=0.6847 | supcon=0.0000 | jsn_med=1.4402 | jsn_lat=1.2982 | osteo=1.1563 | uncert=0.8953 | total=4.0123 | proto=0.6336
+2026-06-19 10:04:48 | INFO     | trainer |   step 2/2  kl=1.5510 | coral=0.6957 | supcon=0.0000 | jsn_med=1.3424 | jsn_lat=1.0281 | osteo=1.1052 | uncert=0.6503 | total=3.8622 | proto=0.5536
+2026-06-19 10:04:48 | INFO     | __main__ |   E8 PASS ✓  final total=3.8622
+2026-06-19 10:04:48 | INFO     | __main__ | 
+2026-06-19 10:04:48 | INFO     | __main__ | ==============================================================
+2026-06-19 10:04:48 | INFO     | __main__ |   Done — 1 experiment(s) passed ✓
+2026-06-19 10:04:48 | INFO     | __main__ | ==============================================================
