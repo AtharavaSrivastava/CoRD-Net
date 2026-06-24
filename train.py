@@ -41,6 +41,12 @@ def parse_args() -> argparse.Namespace:
                    help="Root directory of the OAI dataset")
     p.add_argument("--metadata-csv",   type=str, default=None,
                    help="Path to OAI metadata CSV (Layout B)")
+    p.add_argument("--train-csv",      type=str, default=None,
+                   help="Mode 3: CSV for training split only")
+    p.add_argument("--val-csv",        type=str, default=None,
+                   help="Mode 3: CSV for validation split only")
+    p.add_argument("--test-csv",       type=str, default=None,
+                   help="Mode 3: CSV for test split only")
     p.add_argument("--epochs",         type=int, default=None)
     p.add_argument("--batch-size",     type=int, default=None)
     p.add_argument("--lr",             type=float, default=None)
@@ -74,6 +80,12 @@ def main() -> None:
         metadata_csv  = args.metadata_csv,
     )
 
+    if args.train_csv:
+        cfg.training.train_csv = args.train_csv
+    if args.val_csv:
+        cfg.training.val_csv = args.val_csv
+    if args.test_csv:
+        cfg.training.test_csv = args.test_csv
     if args.checkpoint_dir:
         cfg.training.checkpoint_dir = args.checkpoint_dir
     if args.num_workers is not None:

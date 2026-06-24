@@ -127,6 +127,17 @@ class TrainingConfig:
     E.g. image "001.png" → medial "001_MED.png", lateral "001_LAT.png".
     Override if your OAI layout uses different conventions."""
 
+    # ── Split Mode 3: separate CSV per split ──────────────────────────────
+    train_csv: Optional[str] = None
+    """Path to a CSV containing only training samples (Mode 3)."""
+
+    val_csv: Optional[str] = None
+    """Path to a CSV containing only validation samples (Mode 3)."""
+
+    test_csv: Optional[str] = None
+    """Path to a CSV containing only test samples (Mode 3).
+    Optional — if omitted, the test DataLoader will be empty."""
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Experiment registry
