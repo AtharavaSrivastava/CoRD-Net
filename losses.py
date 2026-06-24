@@ -62,6 +62,17 @@ class MultiTaskLoss(nn.Module):
         self.ce_jsn = nn.CrossEntropyLoss(ignore_index=-1)
         self.bce    = nn.BCEWithLogitsLoss()
         self.mse    = nn.MSELoss()
+    def _safe_ce(self, logits, targets):
+        valid = targets != -1
+
+        if not valid.any():
+            return torch.zeros(
+                (),
+                device=logits.device,
+                dtype=logits.dtype,
+            )
+
+        return self.ce_jsn(logits, targets)
 
     # ── Individual loss components ─────────────────────────────────────────
 
@@ -131,20 +142,28 @@ class MultiTaskLoss(nn.Module):
             total       += self.weights["h3"] * ld["supcon"]
 
         if "h4" in self.active and "h4" in preds:
-            ld["jsn_med"] = self.ce_jsn(preds["h4"], labels["jsn_med"])
-            total         += self.weights["h4"] * ld["jsn_med"]
+            ld["jsn_med"] = self._safe_ce(
+                preds["h4"],
+                labels["jsn_med"]
+            )
+            total += self.weights["h4"] * ld["jsn_med"]
 
         if "h5" in self.active and "h5" in preds:
-            ld["jsn_lat"] = self.ce_jsn(preds["h5"], labels["jsn_lat"])
-            total         += self.weights["h5"] * ld["jsn_lat"]
+            ld["jsn_lat"] = self._safe_ce(
+                preds["h5"],
+                labels["jsn_lat"]
+            )
+            total += self.weights["h5"] * ld["jsn_lat"]
 
         if "h6" in self.active and "h6" in preds:
-            ld["osteo"] = torch.stack([
-                self.ce_jsn(h, labels["osteophyte"][:, i])
+            osteo_losses = [
+                self._safe_ce(h, labels["osteophyte"][:, i])
                 for i, h in enumerate(preds["h6"])
-            ]).mean()
-            total += self.weights["h6"] * ld["osteo"]
+            ]
 
+            ld["osteo"] = torch.stack(osteo_losses).mean()
+            total += self.weights["h6"] * ld["osteo"]
+        
         if "h7" in self.active and "h7" in preds and "h1" in preds:
             probs   = F.softmax(preds["h1"], dim=-1)
             entropy = -(probs * torch.log(probs + 1e-6)).sum(dim=-1, keepdim=True)
