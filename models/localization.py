@@ -90,25 +90,4 @@ class KneeLocalizer(nn.Module):
             padding_mode="border",
             align_corners=False
         )
-
-        if not hasattr(self, "_debug_printed"):
-            print("\nTheta sample:")
-            print(theta[0].detach().cpu())
-
-            print("\nInput shape:", x.shape)
-            print("Localized shape:", localized.shape)
-
-            diff = (localized - x).abs()
-
-            print("\nSTN Difference Statistics")
-            print("Mean:", diff.mean().item())
-            print("Max :", diff.max().item())
-
-            self._debug_printed = True
-
-        return localized, theta
-        if not hasattr(self, "_debug_printed"):
-            print("\nTheta sample:")
-            print(theta[0].detach().cpu())
-            self._debug_printed = True
         return localized, theta
