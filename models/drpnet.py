@@ -170,9 +170,14 @@ class DRPNet(nn.Module):
         else:
             self.heads      = None
             self.classifier = nn.Linear(self._fused_dim, K)
+        if cfg.use_stn:
+            self.localizer = KneeLocalizer(img_size=cfg.stn_img_size)
 
+            for p in self.localizer.parameters():
+                p.requires_grad = False
         # Internal cache for EMA prototype update (set during forward)
         self._last_drp_emb: Optional[torch.Tensor] = None
+
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -236,7 +241,15 @@ class DRPNet(nn.Module):
                       if global_crop.shape[1] == 3 else global_crop)
             localized, theta = self.localizer(x_gray)
             out["theta"] = theta
-            global_crop  = localized.expand(-1, 3, -1, -1).clone()
+            global_crop = localized.expand(-1, 3, -1, -1).clone()
+            diff = (localized - x_gray).abs()
+
+            print(
+                "mean:",
+                diff.mean().item(),
+                "max:",
+                diff.max().item()
+            )
             # ^ .clone() ensures the view is not shared with the graph leaf
 
         # ── Backbone: encode global crop (one pass, reused by E4 and E5) ─

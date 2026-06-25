@@ -82,7 +82,33 @@ class KneeLocalizer(nn.Module):
         xs = self.loc_net(x).flatten(1)
         theta = self.fc_loc(xs).view(-1, 2, 3)
         grid = F.affine_grid(theta, x.size(), align_corners=False)
+
         localized = F.grid_sample(
-            x, grid, mode="bilinear", padding_mode="border", align_corners=False
+            x,
+            grid,
+            mode="bilinear",
+            padding_mode="border",
+            align_corners=False
         )
+
+        if not hasattr(self, "_debug_printed"):
+            print("\nTheta sample:")
+            print(theta[0].detach().cpu())
+
+            print("\nInput shape:", x.shape)
+            print("Localized shape:", localized.shape)
+
+            diff = (localized - x).abs()
+
+            print("\nSTN Difference Statistics")
+            print("Mean:", diff.mean().item())
+            print("Max :", diff.max().item())
+
+            self._debug_printed = True
+
+        return localized, theta
+        if not hasattr(self, "_debug_printed"):
+            print("\nTheta sample:")
+            print(theta[0].detach().cpu())
+            self._debug_printed = True
         return localized, theta
