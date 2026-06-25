@@ -76,7 +76,7 @@ class Trainer:
         self.scaler    = GradScaler() if self.tcfg.amp else None
 
         self.epoch    = 0
-        self.best_val = float("inf")
+        self.best_qwk = -1.0
 
         # ── Per-epoch history (populated during fit) ──────────────────────
         self.history: Dict[str, List] = {
@@ -197,7 +197,11 @@ class Trainer:
         with autocast(enabled=self.tcfg.amp):
             preds   = self.model(global_crop, medial_crop, lateral_crop)
             loss_kv = self._compute_loss(preds, labels)
+            logits = preds["logits"]
+            pred_cls = logits.argmax(dim=1)
 
+            correct = (pred_cls == labels["kl"]).sum().item()
+            count = labels["kl"].size(0)
         total = loss_kv["total"]
 
         if self.scaler:
@@ -222,22 +226,39 @@ class Trainer:
             drp_emb = getattr(self.model, "_last_drp_emb", None)
             if drp_emb is not None:
                 self.model.update_prototypes(drp_emb.detach(), labels["kl"])
+        out = {k: v.item() for k, v in loss_kv.items()}
+        out["correct"] = correct
+        out["count"] = count
 
-        return {k: v.item() for k, v in loss_kv.items()}
+        return out
 
     # ── Epoch loops ───────────────────────────────────────────────────────────
-
     def train_epoch(self, loader: Iterator) -> Dict[str, float]:
-        """Run one full training epoch; return averaged loss dict."""
+        """Run one full training epoch; return averaged losses + accuracy."""
         self.model.train()
+
         totals: Dict[str, float] = {}
         n = 0
+
+        correct = 0
+        count = 0
+
         for batch in loader:
-            step_losses = self._step(batch)
-            for k, v in step_losses.items():
+            step = self._step(batch)
+
+            correct += step.pop("correct")
+            count += step.pop("count")
+
+            for k, v in step.items():
                 totals[k] = totals.get(k, 0.0) + v
+
             n += 1
-        return {k: v / max(n, 1) for k, v in totals.items()}
+
+        result = {k: v / max(n, 1) for k, v in totals.items()}
+        result["accuracy"] = correct / max(count, 1)
+
+        return result
+
 
     @torch.no_grad()
     def val_epoch(self, loader: Iterator) -> Dict[str, float]:
@@ -344,7 +365,7 @@ class Trainer:
             "optimizer_state_dict": self.optimizer.state_dict(),
             "scheduler_state_dict": self.scheduler.state_dict()
                                     if self.scheduler else None,
-            "best_val":             self.best_val,
+            "best_qwk":             self.best_qwk,
             "train_losses":         train_losses,
             "val_losses":           val_losses or {},
             "history":              self.history,
@@ -365,7 +386,7 @@ class Trainer:
             device    = self.device,
         )
         self.epoch    = ckpt.get("epoch", 0)
-        self.best_val = ckpt.get("best_val", float("inf"))
+        self.best_qwk = ckpt.get("best_qwk", -1.0)
         if "history" in ckpt:
             self.history = ckpt["history"]
         logger.info(
@@ -428,9 +449,9 @@ class Trainer:
                 val_metrics = self.val_epoch(val_loader)
                 log_parts  += [f"val/{k}={v:.4f}" for k, v in val_metrics.items()]
                 val_total   = val_metrics.get("total", float("inf"))
-                if val_total < self.best_val:
-                    self.best_val = val_total
-                    self._save(epoch, train_losses, val_metrics, tag="best")
+            if val_metrics.get("kappa",-1.0) > self.best_qwk:
+                self.best_qwk = val_metrics["kappa"]
+                self._save(epoch, train_losses, val_metrics, tag="best")
 
             logger.info(" | ".join(log_parts))
 
@@ -438,7 +459,7 @@ class Trainer:
             self.history["epoch"].append(epoch)
             self.history["train_loss"].append(train_losses.get("total", float("nan")))
             self.history["val_loss"].append(val_metrics.get("total",    float("nan")))
-            self.history["train_accuracy"].append(float("nan"))   # filled at end
+            self.history["train_accuracy"].append(train_losses.get("accuracy", float("nan")))
             self.history["val_accuracy"].append(val_metrics.get("accuracy",  float("nan")))
             self.history["val_macro_f1"].append( val_metrics.get("macro_f1", float("nan")))
             self.history["val_qwk"].append(      val_metrics.get("kappa",    float("nan")))
@@ -489,20 +510,12 @@ class Trainer:
         if train_loader is not None:
             logger.info("Collecting train logits …")
             train_logits, train_labels = self.collect_logits(train_loader)
-            # Backfill per-epoch train accuracy with the final-epoch value
-            if len(train_logits):
-                preds, _ = get_predictions(train_logits)
-                from sklearn.metrics import accuracy_score
-                final_acc = accuracy_score(train_labels, preds)
-                self.history["train_accuracy"] = [final_acc] * len(
-                    self.history["epoch"]
-                )
+
 
         test_logits = test_labels = None
         if test_loader is not None:
             logger.info("Collecting test logits …")
             test_logits, test_labels = self.collect_logits(test_loader)
-
         generate_all_reports(
             writer        = writer,
             history       = self.history,

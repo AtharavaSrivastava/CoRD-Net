@@ -201,7 +201,6 @@ def _plot_one(
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
-
 def _save_plots(
     history: Dict[str, List],
     writer:  ResultsWriter,
@@ -237,6 +236,13 @@ def _save_plots(
             [_TRAIN_CLR, _VAL_CLR],
         ),
         (
+        "loss_vs_accuracy.png",
+        "Loss vs Accuracy",
+        None,
+        {},
+        None,
+        ),
+        (
             "f1_curve.png",
             "Validation Macro F1",
             "Macro F1",
@@ -267,8 +273,60 @@ def _save_plots(
     ]
 
     for fname, title, ylabel, series, colors in plots:
-        fig, ax = plt.subplots(figsize=_FIGSIZE)
-        _plot_one(ax, epochs, series, title, ylabel, colors)
+
+        if fname == "loss_vs_accuracy.png":
+            fig, ax1 = plt.subplots(figsize=_FIGSIZE)
+
+            # Left axis: Loss
+            ax1.plot(
+                epochs,
+                history.get("train_loss", []),
+                label="Train Loss",
+                color=_TRAIN_CLR,
+                linewidth=1.8,
+            )
+            ax1.plot(
+                epochs,
+                history.get("val_loss", []),
+                label="Val Loss",
+                color=_VAL_CLR,
+                linewidth=1.8,
+            )
+            ax1.set_xlabel("Epoch", fontsize=11)
+            ax1.set_ylabel("Loss", fontsize=11)
+            ax1.grid(True, alpha=0.3)
+
+            # Right axis: Accuracy
+            ax2 = ax1.twinx()
+
+            ax2.plot(
+                epochs,
+                history.get("train_accuracy", []),
+                "--",
+                label="Train Accuracy",
+                color=_TRAIN_CLR,
+                linewidth=1.8,
+            )
+            ax2.plot(
+                epochs,
+                history.get("val_accuracy", []),
+                "--",
+                label="Val Accuracy",
+                color=_VAL_CLR,
+                linewidth=1.8,
+            )
+            ax2.set_ylabel("Accuracy", fontsize=11)
+
+            ax1.set_title(title, fontsize=12)
+
+            lines = ax1.get_lines() + ax2.get_lines()
+            labels = [l.get_label() for l in lines]
+            ax1.legend(lines, labels, fontsize=9, loc="center right")
+
+        else:
+            fig, ax = plt.subplots(figsize=_FIGSIZE)
+            _plot_one(ax, epochs, series, title, ylabel, colors)
+
         plt.tight_layout()
         path = writer.plot_path(fname)
         fig.savefig(path, dpi=_DPI, bbox_inches="tight")
