@@ -82,7 +82,12 @@ class KneeLocalizer(nn.Module):
         xs = self.loc_net(x).flatten(1)
         theta = self.fc_loc(xs).view(-1, 2, 3)
         grid = F.affine_grid(theta, x.size(), align_corners=False)
+
         localized = F.grid_sample(
-            x, grid, mode="bilinear", padding_mode="border", align_corners=False
+            x,
+            grid,
+            mode="bilinear",
+            padding_mode="border",
+            align_corners=False
         )
         return localized, theta

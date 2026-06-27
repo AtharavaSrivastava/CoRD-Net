@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[c]
+*.pyo
+
+# Training artifacts
+logs/
+checkpoints/
+# Dataset
+Dataset/
+DatasetMerged/
+
+# Split files (if generated)
+train.txt
+val.txt
+test.txt
+
+# OS
+.DS_Store
+Thumbs.db

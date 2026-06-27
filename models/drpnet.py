@@ -174,6 +174,7 @@ class DRPNet(nn.Module):
         # Internal cache for EMA prototype update (set during forward)
         self._last_drp_emb: Optional[torch.Tensor] = None
 
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _encode_single(
@@ -236,7 +237,10 @@ class DRPNet(nn.Module):
                       if global_crop.shape[1] == 3 else global_crop)
             localized, theta = self.localizer(x_gray)
             out["theta"] = theta
-            global_crop  = localized.expand(-1, 3, -1, -1).clone()
+            global_crop = localized.expand(-1, 3, -1, -1).clone()
+            
+
+
             # ^ .clone() ensures the view is not shared with the graph leaf
 
         # ── Backbone: encode global crop (one pass, reused by E4 and E5) ─
