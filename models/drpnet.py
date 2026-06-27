@@ -260,10 +260,13 @@ class DRPNet(nn.Module):
                     "use_compartment=True (experiments E4–E8). "
                     "Check your DataLoader batch format."
                 )
-            _, g_feat, m_feat, l_feat = self.compartment(
-                global_crop, medial_crop, lateral_crop
+            g_feat, m_feat, l_feat = self.compartment(
+                global_pooled,
+                medial_crop,
+                lateral_crop,
             )
-            # g_feat, m_feat, l_feat: (B, 768) each
+
+            #m_feat, l_feat: (B, 768) each
             # global_spatial is still the single-pass result from above
 
         # ── E5: DRP Block ─────────────────────────────────────────────────

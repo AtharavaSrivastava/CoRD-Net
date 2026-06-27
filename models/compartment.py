@@ -179,18 +179,31 @@ class CompartmentBranchModule(nn.Module):
         feature_dim: int = 768,
     ) -> None:
         super().__init__()
-        self.global_branch      = _EncoderBranch(stem, backbone_features, feature_dim)
-        self.compartment_branch = _EncoderBranch(stem, backbone_features, feature_dim)
-        self.fusion             = CompartmentFusion(feature_dim)
+        self.compartment_branch = _EncoderBranch(
+            stem,
+            backbone_features,
+            feature_dim
+        )
+        self.fusion = CompartmentFusion(feature_dim)
 
     def forward(
         self,
-        global_crop: torch.Tensor,
+        global_feat: torch.Tensor,
         medial_crop: torch.Tensor,
         lateral_crop: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Three (B, 3, H, W) crops → (fused, global, medial, lateral)."""
-        g = self.global_branch(global_crop)
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Fuse the global feature with medial and lateral compartment features.
+        Returns:
+            fused_feat, medial_feat, lateral_feat
+        """
         m = self.compartment_branch(medial_crop)
         l = self.compartment_branch(lateral_crop)
-        return self.fusion(g, m, l), g, m, l
+
+        fused = self.fusion(
+            global_feat,
+            m,
+            l,
+        )
+
+        return fused, m, l

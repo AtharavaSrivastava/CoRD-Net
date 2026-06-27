@@ -6,6 +6,8 @@ __pycache__/
 # Training artifacts
 logs/
 checkpoints/
+resulsts/
+
 # Dataset
 Dataset/
 DatasetMerged/
