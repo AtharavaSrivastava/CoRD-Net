@@ -29,6 +29,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.cuda.amp import GradScaler, autocast
 
+from collections import defaultdict
+import numpy as np
+
 from config import Config
 from losses import MultiTaskLoss
 from metrics import evaluate, compute_all_metrics, get_predictions, _to_numpy
@@ -62,6 +65,17 @@ class Trainer:
         cfg:     Config,
     ) -> None:
         self.model   = model
+        print("\n========== CLASSIFIER INITIALIZATION ==========")
+
+        for name, p in self.model.named_parameters():
+            if "classifier" in name:
+                print(name)
+                print("mean:", p.mean().item())
+                print("std :", p.std().item())
+            if "classifier.bias" in name:
+                print("Classifier bias:", p.detach().cpu())
+
+        print("===============================================\n")
         self.loss_fn = loss_fn
         self.cfg     = cfg
         self.tcfg    = cfg.training
@@ -196,16 +210,24 @@ class Trainer:
 
         with autocast(enabled=self.tcfg.amp):
             preds   = self.model(global_crop, medial_crop, lateral_crop)
+            # ---------- DEBUG COLLECTION ----------
+            if hasattr(self.model, "debug_stats"):
+                for k, v in self.model.debug_stats.items():
+                    self.debug[k].append(v)
             loss_kv = self._compute_loss(preds, labels)
             logits = preds["logits"]
             pred_cls = logits.argmax(dim=1)
-
             correct = (pred_cls == labels["kl"]).sum().item()
             count = labels["kl"].size(0)
         total = loss_kv["total"]
 
         if self.scaler:
             self.scaler.scale(total).backward()
+            classifier = self.model.classifier
+            if classifier is None:
+                classifier = self.model.heads["h1"].classifier   # adjust if needed
+
+            before = classifier.weight.detach().clone()
             if self.tcfg.gradient_clip > 0:
                 self.scaler.unscale_(self.optimizer)
                 nn.utils.clip_grad_norm_(
@@ -229,25 +251,40 @@ class Trainer:
         out = {k: v.item() for k, v in loss_kv.items()}
         out["correct"] = correct
         out["count"] = count
+    
+        # ADD THIS
+        out["logits_mean"] = preds["logits"].detach().mean(dim=0).cpu()
 
+        out["correct"] = correct
+        out["count"] = count
         return out
 
     # ── Epoch loops ───────────────────────────────────────────────────────────
-    def train_epoch(self, loader: Iterator) -> Dict[str, float]:
+    def train_epoch(self, loader):
         """Run one full training epoch; return averaged losses + accuracy."""
         self.model.train()
 
-        totals: Dict[str, float] = {}
+        self.debug = defaultdict(list)
+
+        totals = {}
         n = 0
 
         correct = 0
         count = 0
+
+        # ADD HERE
+        logit_sum = torch.zeros(self.cfg.model.num_classes)
+        num_batches = 0
 
         for batch in loader:
             step = self._step(batch)
 
             correct += step.pop("correct")
             count += step.pop("count")
+
+            # ADD THESE TWO LINES
+            logit_sum += step.pop("logits_mean")
+            num_batches += 1
 
             for k, v in step.items():
                 totals[k] = totals.get(k, 0.0) + v
@@ -257,6 +294,17 @@ class Trainer:
         result = {k: v / max(n, 1) for k, v in totals.items()}
         result["accuracy"] = correct / max(count, 1)
 
+        print("\n" + "=" * 60)
+        print("TRAIN EPOCH DEBUG")
+        print("=" * 60)
+
+        print("Average logits:", logit_sum / num_batches)
+
+        for k, values in self.debug.items():
+            print(f"{k:15s}: {np.mean(values):.4f} ± {np.std(values):.4f}")
+
+        print("=" * 60 + "\n")
+
         return result
 
 
@@ -264,16 +312,18 @@ class Trainer:
     def val_epoch(self, loader: Iterator) -> Dict[str, float]:
         """
         Full validation pass.
-
         Returns averaged losses + accuracy / kappa / mae for the
         per-epoch log.  Does NOT store logits — that is done by
         collect_logits() when full metrics are needed.
         """
         self.model.eval()
+
         totals: Dict[str, float] = {}
         all_logits: List[torch.Tensor] = []
         all_labels: List[torch.Tensor] = []
+
         n = 0
+        pred_hist = torch.zeros(self.cfg.model.num_classes, dtype=torch.long)
 
         for batch in loader:
             global_crop, medial_crop, lateral_crop, labels = \
@@ -281,15 +331,44 @@ class Trainer:
             global_crop, medial_crop, lateral_crop, labels = \
                 self._to_device(global_crop, medial_crop, lateral_crop, labels)
 
-            preds  = self.model(global_crop, medial_crop, lateral_crop)
+            preds = self.model(global_crop, medial_crop, lateral_crop)
+
+            logits = preds["logits"]          # <-- ADD THIS
+
             losses = self._compute_loss(preds, labels)
 
             for k, v in losses.items():
                 totals[k] = totals.get(k, 0.0) + v.item()
 
+            pred = logits.argmax(dim=1).cpu()
+            pred_hist += torch.bincount(
+                pred,
+                minlength=self.cfg.model.num_classes,
+            )
+
+            if n == 0:
+                print("First batch prediction counts:",
+                    torch.bincount(
+                        pred,
+                        minlength=self.cfg.model.num_classes
+                    ))
+
             if "logits" in preds:
-                all_logits.append(preds["logits"].cpu())
+                all_logits.append(logits.cpu())
                 all_labels.append(labels["kl"].cpu())
+            if n == 0:
+                logits = preds["logits"].detach()
+
+                print("\n===== LOGIT DEBUG =====")
+                print("Mean :", logits.mean(0).cpu())
+                print("Std  :", logits.std(0).cpu())
+                print("Max  :", logits.max(0).values.cpu())
+                print("Min  :", logits.min(0).values.cpu())
+            print(
+                global_crop.norm(dim=1).mean(),
+                medial_feat.norm(dim=1).mean(),
+                lateral_feat.norm(dim=1).mean()
+            )
             n += 1
 
         result = {k: v / max(n, 1) for k, v in totals.items()}
@@ -297,14 +376,30 @@ class Trainer:
         if all_logits:
             logits_cat = torch.cat(all_logits, dim=0)
             labels_cat = torch.cat(all_labels, dim=0)
-            m = evaluate(logits_cat, labels_cat, self.cfg.model.num_classes)
-            result.update(m)   # accuracy, kappa, mae
 
-            # Extra metrics for history
+            m = evaluate(
+                logits_cat,
+                labels_cat,
+                self.cfg.model.num_classes,
+            )
+            result.update(m)
+
             full = compute_all_metrics(
-                logits_cat, labels_cat, self.cfg.model.num_classes
+                logits_cat,
+                labels_cat,
+                self.cfg.model.num_classes,
             )
             result["macro_f1"] = full["macro_f1"]
+
+        label_hist = torch.bincount(
+            labels_cat,
+            minlength=self.cfg.model.num_classes,
+        )
+
+        print("\n========== VALIDATION HISTOGRAM ==========")
+        print("Pred :", pred_hist.tolist())
+        print("True :", label_hist.tolist())
+        print("==========================================\n")
 
         return result
 

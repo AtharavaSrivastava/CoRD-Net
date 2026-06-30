@@ -143,6 +143,15 @@ class CompartmentFusion(nn.Module):
         """Three (B, feat_dim) tensors → one (B, feat_dim) tensor."""
         concat = torch.cat([global_feat, medial_feat, lateral_feat], dim=1)
         w = self.gate(concat)
+        if self.training:
+            self.debug_stats = {
+                "gate_global": w[:, 0].mean().item(),
+                "gate_medial": w[:, 1].mean().item(),
+                "gate_lateral": w[:, 2].mean().item(),
+            }
+        global_feat = F.layer_norm(global_feat, (768,))
+        medial_feat = F.layer_norm(medial_feat, (768,))
+        lateral_feat = F.layer_norm(lateral_feat, (768,))
         fused = w[:, 0:1] * global_feat + w[:, 1:2] * medial_feat + w[:, 2:3] * lateral_feat
         return self.proj(fused)
 
@@ -185,18 +194,82 @@ class CompartmentBranchModule(nn.Module):
             feature_dim
         )
         self.fusion = CompartmentFusion(feature_dim)
+    def _split_compartments(
+            self,
+            x: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            """
+            Split a full knee image into overlapping medial and lateral crops.
+            """
+
+            _, _, h, w = x.shape
+
+            overlap = int(0.10 * w)
+            mid = w // 2
+
+            medial = x[:, :, :, :mid + overlap]
+            lateral = x[:, :, :, mid - overlap:]
+
+            medial = F.interpolate(
+                medial,
+                size=(h, w),
+                mode="bilinear",
+                align_corners=False,
+            )
+
+            lateral = F.interpolate(
+                lateral,
+                size=(h, w),
+                mode="bilinear",
+                align_corners=False,
+            )
+
+            return medial, lateral
 
     def forward(
         self,
-        global_feat: torch.Tensor,
-        medial_crop: torch.Tensor,
-        lateral_crop: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        global_feat,
+        global_crop,
+    ):
         """
         Fuse the global feature with medial and lateral compartment features.
         Returns:
             fused_feat, medial_feat, lateral_feat
         """
+        medial_crop, lateral_crop = self._split_compartments(global_crop)
+        if self.training and not hasattr(self, "_crop_debug"):
+            self._crop_debug = True
+
+            from pathlib import Path
+            import matplotlib.pyplot as plt
+
+            Path("results/debug").mkdir(parents=True, exist_ok=True)
+
+            images = {
+                "global": global_crop[0],
+                "medial": medial_crop[0],
+                "lateral": lateral_crop[0],
+            }
+
+            # Undo ImageNet normalization
+            mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+            std  = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+
+            for name, img in images.items():
+                img = img.detach().cpu()
+
+                mean_cpu = mean.cpu()
+                std_cpu = std.cpu()
+
+                img = img * std_cpu + mean_cpu
+                img = img.clamp(0, 1)
+
+                plt.figure(figsize=(5, 5))
+                plt.imshow(img.permute(1, 2, 0))
+                plt.axis("off")
+                plt.title(name.capitalize())
+                plt.savefig(f"results/debug/{name}.png", dpi=200, bbox_inches="tight")
+                plt.close()
         m = self.compartment_branch(medial_crop)
         l = self.compartment_branch(lateral_crop)
 
@@ -205,5 +278,16 @@ class CompartmentBranchModule(nn.Module):
             m,
             l,
         )
+        if self.training:
+            self.debug_stats = {
+                "global_norm": global_feat.norm(dim=1).mean().item(),
+                "medial_norm": m.norm(dim=1).mean().item(),
+                "lateral_norm": l.norm(dim=1).mean().item(),
 
+                "gm_diff": (global_feat - m).abs().mean().item(),
+                "gl_diff": (global_feat - l).abs().mean().item(),
+                "ml_diff": (m - l).abs().mean().item(),
+            }
+        if self.training:
+            self.debug_stats.update(self.fusion.debug_stats)
         return fused, m, l

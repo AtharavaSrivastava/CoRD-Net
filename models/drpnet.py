@@ -145,8 +145,13 @@ class DRPNet(nn.Module):
         # ── Fusion projector ──────────────────────────────────────────────
         # cat[global(D), drp/refined(E), rtc(E)] → fused_dim(Fd)
         concat_dim = D
+
+        if cfg.use_compartment:
+            concat_dim += D
+
         if cfg.use_drp:
             concat_dim += E
+
         if cfg.use_rtc:
             concat_dim += E
 
@@ -254,17 +259,12 @@ class DRPNet(nn.Module):
 
         # ── E4: Compartment Branches ──────────────────────────────────────
         if self.compartment is not None:
-            if medial_crop is None or lateral_crop is None:
-                raise RuntimeError(
-                    "medial_crop and lateral_crop must be provided when "
-                    "use_compartment=True (experiments E4–E8). "
-                    "Check your DataLoader batch format."
-                )
-            g_feat, m_feat, l_feat = self.compartment(
+            g_feat = global_pooled
+            fused_feat, m_feat, l_feat = self.compartment(
                 global_pooled,
-                medial_crop,
-                lateral_crop,
+                global_crop,
             )
+
 
             #m_feat, l_feat: (B, 768) each
             # global_spatial is still the single-pass result from above
@@ -292,7 +292,7 @@ class DRPNet(nn.Module):
             rtc_emb = self.rtc(m_feat, l_feat, g_feat)   # (B, 256)
 
         # ── Fusion + Projection ───────────────────────────────────────────
-        parts = [g_feat]
+        parts = [g_feat, fused_feat]
         if refined_emb is not None:
             parts.append(refined_emb)
         if rtc_emb is not None:
@@ -309,6 +309,20 @@ class DRPNet(nn.Module):
         else:
             assert self.classifier is not None
             out["logits"] = self.classifier(feat)
+            if self.training and not hasattr(self, "_feat_debug"):
+                self._feat_debug = True
+
+                print("Feature mean :", feat.mean().item())
+                print("Feature std  :", feat.std().item())
+                print("Feature norm :", feat.norm(dim=1).mean().item())
+
+                print("Classifier weight mean:",
+                    self.classifier.weight.mean().item())
+                print("Classifier weight std :",
+                    self.classifier.weight.std().item())
+
+                print("Classifier bias:",
+                    self.classifier.bias.detach().cpu())
 
         return out
 
