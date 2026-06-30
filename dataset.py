@@ -107,9 +107,6 @@ class OAIDataset(Dataset):
         self.cfg_model  = cfg_model
         self.cfg_train  = cfg_train
         self.split      = split
-        self.use_3crop  = cfg_model.use_compartment
-        self.med_suffix = cfg_train.medial_suffix
-        self.lat_suffix = cfg_train.lateral_suffix
         self.transform  = transform or (
             get_train_transforms(cfg_model) if split == "train"
             else get_val_transforms(cfg_model)
@@ -126,31 +123,11 @@ class OAIDataset(Dataset):
             )
         return self.transform(Image.open(path).convert("L"))
 
-    def _compartment_path(self, base: Path, suffix: str) -> Path:
-        return base.parent / (base.stem + suffix + base.suffix)
-
     def __getitem__(
         self, idx: int
     ) -> Tuple[List[torch.Tensor], Dict[str, torch.Tensor]]:
         s          = self.samples[idx]
         global_img = self._load(s.path)
-
-        if self.use_3crop:
-            med_path = self._compartment_path(s.path, self.med_suffix)
-            lat_path = self._compartment_path(s.path, self.lat_suffix)
-            if not med_path.exists():
-                logger.debug("Medial crop missing for %s — using global", s.path.name)
-                med_img = global_img.clone()
-            else:
-                med_img = self._load(med_path)
-            if not lat_path.exists():
-                logger.debug("Lateral crop missing for %s — using global", s.path.name)
-                lat_img = global_img.clone()
-            else:
-                lat_img = self._load(lat_path)
-            crops = [global_img, med_img, lat_img]
-        else:
-            crops = [global_img]
 
         labels: Dict[str, torch.Tensor] = {
             "kl":         torch.tensor(s.kl,         dtype=torch.long),
@@ -158,7 +135,7 @@ class OAIDataset(Dataset):
             "jsn_lat":    torch.tensor(s.jsn_lat,    dtype=torch.long),
             "osteophyte": torch.tensor(list(s.osteophyte), dtype=torch.long),
         }
-        return crops, labels
+        return [global_img], labels
 
 
 # ──────────────────────────────────────────────────────────────────────────────

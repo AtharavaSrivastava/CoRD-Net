@@ -217,8 +217,6 @@ class DRPNet(nn.Module):
     def forward(
         self,
         global_crop: torch.Tensor,
-        medial_crop:  Optional[torch.Tensor] = None,
-        lateral_crop: Optional[torch.Tensor] = None,
     ) -> dict[str, torch.Tensor | list]:
         """
         Parameters
@@ -254,18 +252,17 @@ class DRPNet(nn.Module):
         # global_pooled:  (B, 768)           used by fusion + RTC
 
         g_feat = global_pooled          # updated by compartment below if E4+
-        m_feat: Optional[torch.Tensor] = None
-        l_feat: Optional[torch.Tensor] = None
+
 
         # ── E4: Compartment Branches ──────────────────────────────────────
         if self.compartment is not None:
             g_feat = global_pooled
+            m_feat: Optional[torch.Tensor] = None
+            l_feat: Optional[torch.Tensor] = None
             fused_feat, m_feat, l_feat = self.compartment(
                 global_pooled,
                 global_crop,
             )
-
-
             #m_feat, l_feat: (B, 768) each
             # global_spatial is still the single-pass result from above
 
@@ -292,14 +289,19 @@ class DRPNet(nn.Module):
             rtc_emb = self.rtc(m_feat, l_feat, g_feat)   # (B, 256)
 
         # ── Fusion + Projection ───────────────────────────────────────────
-        parts = [g_feat, fused_feat]
+        parts = [g_feat]
+
+        if self.compartment is not None:
+            parts.append(fused_feat)
+
         if refined_emb is not None:
             parts.append(refined_emb)
+
         if rtc_emb is not None:
             parts.append(rtc_emb)
 
         fused = torch.cat(parts, dim=1) if len(parts) > 1 else parts[0]
-        feat  = self.projector(fused)                     # (B, fused_dim)
+        feat = self.projector(fused)
 
         # ── E8: Auxiliary Heads or simple classifier ──────────────────────
         if self.heads is not None:

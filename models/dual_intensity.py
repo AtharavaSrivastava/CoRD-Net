@@ -46,6 +46,7 @@ class CLAHEBranch(nn.Module):
         self.bn1 = nn.BatchNorm2d(in_channels)
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.act = nn.GELU()
+        self.alpha = nn.Parameter(torch.tensor(0.0))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """(B, 3, H, W) → (B, out_channels, H, W)."""
@@ -199,8 +200,10 @@ class DualIntensityStem(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """(B, 3, H, W) → (B, 3, H, W) — structure-enhanced."""
-        return self.fusion(
+        enhanced = self.fusion(
             self.clahe_branch(x),
             self.sobel_branch(x),
             self.lap_branch(x),
         )
+
+        return x + 0.1 * enhanced

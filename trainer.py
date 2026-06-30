@@ -154,19 +154,14 @@ class Trainer:
         Format B (E4–E8):  ([global, medial, lateral],  labels_dict)
         """
         crops, labels = batch
-        global_crop  = crops[0]
-        medial_crop  = crops[1] if len(crops) > 1 else None
-        lateral_crop = crops[2] if len(crops) > 2 else None
-        return global_crop, medial_crop, lateral_crop, labels
+        global_crop = batch[0][0]
+        labels = batch[1]
+        return global_crop, labels
 
-    def _to_device(self, global_crop, medial_crop, lateral_crop, labels):
+    def _to_device(self, global_crop, labels):
         global_crop = global_crop.to(self.device, non_blocking=True)
-        if medial_crop  is not None:
-            medial_crop  = medial_crop.to(self.device, non_blocking=True)
-        if lateral_crop is not None:
-            lateral_crop = lateral_crop.to(self.device, non_blocking=True)
         labels = {k: v.to(self.device, non_blocking=True) for k, v in labels.items()}
-        return global_crop, medial_crop, lateral_crop, labels
+        return global_crop, labels
 
     # ── Loss computation ──────────────────────────────────────────────────────
 
@@ -202,14 +197,14 @@ class Trainer:
 
     def _step(self, batch) -> Dict[str, float]:
         """One forward → loss → backward → optimizer step."""
-        global_crop, medial_crop, lateral_crop, labels = self._unpack_batch(batch)
-        global_crop, medial_crop, lateral_crop, labels = \
-            self._to_device(global_crop, medial_crop, lateral_crop, labels)
+        global_crop, labels = self._unpack_batch(batch)
+        global_crop, labels = \
+            self._to_device(global_crop, labels)
 
         self.optimizer.zero_grad(set_to_none=True)
 
         with autocast(enabled=self.tcfg.amp):
-            preds   = self.model(global_crop, medial_crop, lateral_crop)
+            preds   = self.model(global_crop)
             # ---------- DEBUG COLLECTION ----------
             if hasattr(self.model, "debug_stats"):
                 for k, v in self.model.debug_stats.items():
@@ -326,12 +321,12 @@ class Trainer:
         pred_hist = torch.zeros(self.cfg.model.num_classes, dtype=torch.long)
 
         for batch in loader:
-            global_crop, medial_crop, lateral_crop, labels = \
+            global_crop, labels = \
                 self._unpack_batch(batch)
-            global_crop, medial_crop, lateral_crop, labels = \
-                self._to_device(global_crop, medial_crop, lateral_crop, labels)
+            global_crop, labels = \
+                self._to_device(global_crop, labels)
 
-            preds = self.model(global_crop, medial_crop, lateral_crop)
+            preds = self.model(global_crop)
 
             logits = preds["logits"]          # <-- ADD THIS
 
@@ -356,19 +351,7 @@ class Trainer:
             if "logits" in preds:
                 all_logits.append(logits.cpu())
                 all_labels.append(labels["kl"].cpu())
-            if n == 0:
-                logits = preds["logits"].detach()
 
-                print("\n===== LOGIT DEBUG =====")
-                print("Mean :", logits.mean(0).cpu())
-                print("Std  :", logits.std(0).cpu())
-                print("Max  :", logits.max(0).values.cpu())
-                print("Min  :", logits.min(0).values.cpu())
-            print(
-                global_crop.norm(dim=1).mean(),
-                medial_feat.norm(dim=1).mean(),
-                lateral_feat.norm(dim=1).mean()
-            )
             n += 1
 
         result = {k: v / max(n, 1) for k, v in totals.items()}
@@ -409,28 +392,22 @@ class Trainer:
     def collect_logits(
         self, loader: Iterator
     ) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Run the model over *loader* and collect raw logits + labels.
 
-        Returns
-        -------
-        logits: (N, num_classes) float32 numpy array
-        labels: (N,)             int numpy array
-        """
         self.model.eval()
-        all_logits: List[torch.Tensor] = []
-        all_labels: List[torch.Tensor] = []
+
+        all_logits = []
+        all_labels = []
 
         for batch in loader:
-            global_crop, medial_crop, lateral_crop, labels = \
-                self._unpack_batch(batch)
-            global_crop  = global_crop.to(self.device, non_blocking=True)
-            if medial_crop  is not None:
-                medial_crop  = medial_crop.to(self.device, non_blocking=True)
-            if lateral_crop is not None:
-                lateral_crop = lateral_crop.to(self.device, non_blocking=True)
+            global_crop, labels = self._unpack_batch(batch)
 
-            preds = self.model(global_crop, medial_crop, lateral_crop)
+            global_crop = global_crop.to(
+                self.device,
+                non_blocking=True,
+            )
+
+            preds = self.model(global_crop)
+
             if "logits" in preds:
                 all_logits.append(preds["logits"].cpu())
                 all_labels.append(labels["kl"])
@@ -636,7 +613,6 @@ class Trainer:
 
         B         = self.tcfg.batch_size
         K         = self.cfg.model.num_classes
-        use_3crop = self.cfg.model.use_compartment
 
         self.model.train()
         last_losses: Dict[str, float] = {}
@@ -645,13 +621,8 @@ class Trainer:
             self.optimizer.zero_grad(set_to_none=True)
 
             g  = torch.randn(B, 3, image_size, image_size, device=self.device)
-            m  = torch.randn(B, 3, image_size, image_size, device=self.device) \
-                 if use_3crop else None
-            l_ = torch.randn(B, 3, image_size, image_size, device=self.device) \
-                 if use_3crop else None
             labels = make_labels_stub(B, K, self.device)
-
-            preds     = self.model(g, m, l_)
+            preds     = self.model(g)
             loss_dict = self._compute_loss(preds, labels)
             loss_dict["total"].backward()
 

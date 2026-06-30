@@ -48,6 +48,9 @@ class ModelConfig:
     # STN (E2)
     stn_img_size: int = 512
 
+    # Compartments (E4)
+    compartment_overlap = 0.10
+
     # PGR (E6)
     prototype_temperature: float = 0.07
     prototype_ema_momentum: float = 0.99
