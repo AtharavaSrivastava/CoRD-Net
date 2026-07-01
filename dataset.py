@@ -135,7 +135,13 @@ class OAIDataset(Dataset):
             "jsn_lat":    torch.tensor(s.jsn_lat,    dtype=torch.long),
             "osteophyte": torch.tensor(list(s.osteophyte), dtype=torch.long),
         }
-        return [global_img], labels
+        if idx == 3166:
+            print(
+                f"idx={idx}",
+                global_img.mean().item(),
+                global_img.std().item()
+            )
+        return idx, [global_img], labels
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -390,10 +396,17 @@ def _resolve_splits(
     all_s = _discover_grade_dirs(root, mcfg.num_classes)
     return _random_split(all_s, tcfg.train_ratio, tcfg.val_ratio, tcfg.seed)
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Public DataLoader builders
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _worker_init_fn(worker_id):
+    import random
+    import numpy as np
+
+    worker_seed = torch.initial_seed() % (2**32)
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 def _make_loader(
     samples:   List[_Sample],
@@ -403,13 +416,18 @@ def _make_loader(
     shuffle:   bool,
 ) -> DataLoader:
     ds = OAIDataset(samples, cfg_model, cfg_train, split=split)
+    generator = torch.Generator()
+    generator.manual_seed(42)
+
     return DataLoader(
         ds,
-        batch_size  = cfg_train.batch_size,
-        shuffle     = shuffle,
-        num_workers = cfg_train.num_workers,
-        pin_memory  = cfg_train.pin_memory,
-        drop_last   = (split == "train"),
+        batch_size=cfg_train.batch_size,
+        shuffle=shuffle,
+        num_workers=cfg_train.num_workers,
+        pin_memory=cfg_train.pin_memory,
+        drop_last=(split == "train"),
+        generator=generator,
+        worker_init_fn=_worker_init_fn,
     )
 
 

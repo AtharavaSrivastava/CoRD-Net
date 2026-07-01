@@ -150,13 +150,14 @@ class Trainer:
         """
         Accept both 1-crop and 3-crop batch formats.
 
-        Format A (E1–E3):  ([global],                  labels_dict)
-        Format B (E4–E8):  ([global, medial, lateral],  labels_dict)
+        Format A (E1–E3): ([global], labels_dict)
+        Format B (E4–E8): ([global, medial, lateral], labels_dict)
         """
-        crops, labels = batch
-        global_crop = batch[0][0]
-        labels = batch[1]
-        return global_crop, labels
+        idxs, crops, labels = batch
+
+        global_crop = crops[0]
+
+        return idxs, global_crop, labels
 
     def _to_device(self, global_crop, labels):
         global_crop = global_crop.to(self.device, non_blocking=True)
@@ -197,7 +198,12 @@ class Trainer:
 
     def _step(self, batch) -> Dict[str, float]:
         """One forward → loss → backward → optimizer step."""
-        global_crop, labels = self._unpack_batch(batch)
+        idxs, global_crop, labels = self._unpack_batch(batch)
+        if not hasattr(self, "_printed_indices"):
+            self._printed_indices = True
+            print("\n========== FIRST BATCH ==========")
+            print(idxs)
+            print("=================================\n")
         global_crop, labels = \
             self._to_device(global_crop, labels)
 
@@ -249,9 +255,6 @@ class Trainer:
     
         # ADD THIS
         out["logits_mean"] = preds["logits"].detach().mean(dim=0).cpu()
-
-        out["correct"] = correct
-        out["count"] = count
         return out
 
     # ── Epoch loops ───────────────────────────────────────────────────────────
@@ -321,7 +324,7 @@ class Trainer:
         pred_hist = torch.zeros(self.cfg.model.num_classes, dtype=torch.long)
 
         for batch in loader:
-            global_crop, labels = \
+            idxs, global_crop, labels = \
                 self._unpack_batch(batch)
             global_crop, labels = \
                 self._to_device(global_crop, labels)
@@ -399,7 +402,7 @@ class Trainer:
         all_labels = []
 
         for batch in loader:
-            global_crop, labels = self._unpack_batch(batch)
+            idxs, global_crop, labels = self._unpack_batch(batch)
 
             global_crop = global_crop.to(
                 self.device,
