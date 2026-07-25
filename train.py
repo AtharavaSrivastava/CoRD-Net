@@ -60,6 +60,8 @@ def parse_args() -> argparse.Namespace:
                    help="Root directory for evaluation output (default: results)")
     p.add_argument("--num-workers",    type=int, default=None)
     p.add_argument("--amp",            action="store_true")
+    p.add_argument("--patience", type=int, default=None,
+               help="Stop if val QWK doesn't improve for this many epochs")
     return p.parse_args()
 
 
@@ -75,6 +77,7 @@ def main() -> None:
         device        = args.device,
         batch_size    = args.batch_size,
         epochs        = args.epochs,
+        patience = args.patience,
         learning_rate = args.lr,
         data_root     = args.data_root,
         metadata_csv  = args.metadata_csv,

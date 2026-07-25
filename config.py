@@ -88,6 +88,7 @@ class TrainingConfig:
 
     batch_size: int = 16
     epochs: int = 100
+    patience: Optional[int] = None
 
     loss_weights: Dict[str, float] = field(default_factory=lambda: {
         "h1": 1.0, "h2": 0.5, "h3": 0.3,

@@ -521,11 +521,17 @@ class Trainer:
                 val_metrics = self.val_epoch(val_loader)
                 log_parts  += [f"val/{k}={v:.4f}" for k, v in val_metrics.items()]
                 val_total   = val_metrics.get("total", float("inf"))
-            if val_metrics.get("kappa",-1.0) > self.best_qwk:
+            if val_metrics.get("kappa", -1.0) > self.best_qwk:
                 self.best_qwk = val_metrics["kappa"]
                 self._save(epoch, train_losses, val_metrics, tag="best")
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
 
             logger.info(" | ".join(log_parts))
+            if self.tcfg.patience is not None and epochs_no_improve >= self.tcfg.patience:
+                logger.info(f"Early stopping at epoch {epoch}")
+                break
 
             # ── Record history ──────────────────────────────────────────
             self.history["epoch"].append(epoch)
