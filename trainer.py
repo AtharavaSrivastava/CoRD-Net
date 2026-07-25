@@ -220,7 +220,7 @@ class Trainer:
             self.scaler.scale(total).backward()
             classifier = self.model.classifier
             if classifier is None:
-                classifier = self.model.heads["h1"].classifier   # adjust if needed
+                classifier = self.model.heads["h1"].fc   # adjust if needed
 
             before = classifier.weight.detach().clone()
             if self.tcfg.gradient_clip > 0:

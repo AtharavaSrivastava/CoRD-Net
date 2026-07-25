@@ -74,7 +74,7 @@ def _collect(model, loader, device) -> tuple[np.ndarray, np.ndarray]:
         g = crops[0].to(device)
         m = crops[1].to(device) if len(crops) > 1 else None
         l = crops[2].to(device) if len(crops) > 2 else None
-        preds = model(g, m, l)
+        preds = model(g)
         all_logits.append(preds["logits"].cpu())
         all_labels.append(labels["kl"])
     return (
