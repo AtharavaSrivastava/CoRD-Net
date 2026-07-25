@@ -553,6 +553,12 @@ class Trainer:
         # Final checkpoint
         self._save(self.epoch, train_losses, tag="final")
         logger.info("Training complete. Generating reports …")
+        best_ckpt_path = os.path.join(self.tcfg.checkpoint_dir, f"{self.cfg.experiment}_best.pt")
+        if os.path.exists(best_ckpt_path):
+            load_checkpoint(best_ckpt_path, self.model, device=self.device)
+            logger.info(f"Reloaded best checkpoint ← {best_ckpt_path} for final reporting")
+        else:
+            logger.warning(f"No best checkpoint found at {best_ckpt_path} — reporting on final-epoch weights")
 
         # ── Post-training reporting ─────────────────────────────────────────
         self._run_reporting(
