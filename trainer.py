@@ -18,6 +18,7 @@ unchanged.
 
 from __future__ import annotations
 
+import os
 import logging
 import time
 from pathlib import Path
