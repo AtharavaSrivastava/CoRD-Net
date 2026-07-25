@@ -193,6 +193,7 @@ def get_config(
     device: Optional[str] = None,
     batch_size: Optional[int] = None,
     epochs: Optional[int] = None,
+    patience: Optional[int] = None,
     learning_rate: Optional[float] = None,
     data_root: Optional[str] = None,
     metadata_csv: Optional[str] = None,
@@ -212,6 +213,8 @@ def get_config(
         train_cfg.batch_size = batch_size
     if epochs is not None:
         train_cfg.epochs = epochs
+    if patience is not None:
+        train_cfg.patience = patience
     if learning_rate is not None:
         train_cfg.learning_rate = learning_rate
     if data_root is not None:
