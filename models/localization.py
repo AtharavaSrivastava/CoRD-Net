@@ -80,7 +80,15 @@ class KneeLocalizer(nn.Module):
             Predicted affine parameters, shape (B, 2, 3).
         """
         xs = self.loc_net(x).flatten(1)
-        theta = self.fc_loc(xs).view(-1, 2, 3)
+        theta_raw = self.fc_loc(xs).view(-1, 2, 3)
+
+        identity = torch.tensor(
+            [1, 0, 0, 0, 1, 0], dtype=theta_raw.dtype, device=theta_raw.device
+        ).view(1, 2, 3)
+
+        max_delta = 0.5
+        theta = identity + torch.tanh(theta_raw - identity) * max_delta
+
         grid = F.affine_grid(theta, x.size(), align_corners=False)
 
         localized = F.grid_sample(
