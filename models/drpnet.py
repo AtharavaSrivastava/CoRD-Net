@@ -87,6 +87,8 @@ class DRPNet(nn.Module):
         E  = cfg.embedding_dim          # 256
         Fd = cfg.fused_dim              # 512
         K  = cfg.num_classes            # 5
+        from utils.visualizer import ModelVisualizer
+        self.visualizer = ModelVisualizer()
 
         # ── E2: STN ───────────────────────────────────────────────────────
         self.localizer: Optional[KneeLocalizer] = None
@@ -194,7 +196,22 @@ class DRPNet(nn.Module):
         pooled:  (B, 768)
         """
         enhanced = self.stem(x)
+
+        if self.training and not hasattr(self, "_vis_stem"):
+            self._vis_stem = True
+            self.visualizer.save_image(
+                enhanced[0],
+                "03_dual_intensity.png",
+                "Dual Intensity Output",
+            )
         spatial  = self.backbone_features(enhanced)
+        if self.training and not hasattr(self, "_vis_backbone"):
+            self._vis_backbone = True
+            self.visualizer.save_featuremap(
+                spatial[0],
+                "04_backbone.png",
+                "Backbone Feature Map",
+            )
         pooled   = self.backbone_pool(spatial)
         return spatial, pooled
 
@@ -232,8 +249,16 @@ class DRPNet(nn.Module):
         out: dict of named outputs (see class docstring).
         """
         out: dict[str, torch.Tensor | list] = {}
+        if self.training and not hasattr(self, "_vis_input"):
 
-        # ── E2: Localization ──────────────────────────────────────────────
+            self._vis_input = True
+
+            self.visualizer.save_image(
+                global_crop[0],
+                "01_input.png",
+                "Input"
+            )
+                # ── E2: Localization ──────────────────────────────────────────────
         if self.localizer is not None:
             # STN expects (B, 1, H, W). Average channels (lossless post-GrayToRGB).
             x_gray = (global_crop.mean(dim=1, keepdim=True)
@@ -241,7 +266,14 @@ class DRPNet(nn.Module):
             localized, theta = self.localizer(x_gray)
             out["theta"] = theta
             global_crop = localized.expand(-1, 3, -1, -1).clone()
-            
+            if self.training and not hasattr(self, "_vis_stn"):
+                self._vis_stn = True
+
+                self.visualizer.save_image(
+                    global_crop[0],
+                    "02_stn.png",
+                    "STN Output"
+                )
 
 
             # ^ .clone() ensures the view is not shared with the graph leaf
@@ -270,12 +302,23 @@ class DRPNet(nn.Module):
         drp_emb: Optional[torch.Tensor] = None
         if self.drp is not None:
             drp_emb = self.drp(global_spatial)       # (B, 256)
+            self.drp.last_input = global_crop.detach().cpu()
             self._last_drp_emb = drp_emb             # cache for EMA update
 
         # ── E6: PGR ───────────────────────────────────────────────────────
         refined_emb = drp_emb   # pass-through when PGR is inactive
         if self.pgr is not None and drp_emb is not None:
             refined_emb, sim_logits = self.pgr(drp_emb)
+            if self.training and not hasattr(self, "_vis_pgr"):
+
+                self._vis_pgr = True
+
+                import numpy as np
+
+                np.save(
+                    "results/visualization/11_pgr_similarity.npy",
+                    sim_logits[0].detach().cpu().numpy(),
+                )
             out["sim_logits"] = sim_logits
 
         # ── E7: RTC ───────────────────────────────────────────────────────
@@ -287,7 +330,16 @@ class DRPNet(nn.Module):
                     "Ensure use_compartment=True when use_rtc=True."
                 )
             rtc_emb = self.rtc(m_feat, l_feat, g_feat)   # (B, 256)
+            if self.training and not hasattr(self, "_vis_rtc"):
 
+                self._vis_rtc = True
+
+                import numpy as np
+
+                np.save(
+                    "results/visualization/12_rtc.npy",
+                    rtc_emb[0].detach().cpu().numpy(),
+                )
         # ── Fusion + Projection ───────────────────────────────────────────
         parts = [g_feat]
 
@@ -325,7 +377,18 @@ class DRPNet(nn.Module):
 
                 print("Classifier bias:",
                     self.classifier.bias.detach().cpu())
+        if self.training and not hasattr(self, "_vis_prediction"):
 
+            self._vis_prediction = True
+
+            pred = out["logits"][0].argmax().item()
+
+            with open(
+                "results/visualization/13_prediction.txt",
+                "w",
+            ) as f:
+
+                f.write(f"Predicted KL Grade: {pred}\n")
         return out
 
 

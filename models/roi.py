@@ -14,7 +14,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from utils.visualizer import ModelVisualizer
 
 class ROIAttentionMask(nn.Module):
     """
@@ -114,6 +114,7 @@ class DRPBlock(nn.Module):
         self, in_channels: int, out_dim: int = 256, reduction: int = 4
     ) -> None:
         super().__init__()
+        self.visualizer = ModelVisualizer()
         self.roi_mask  = ROIAttentionMask(in_channels, reduction)
         self.reweight  = FeatureReweighting()
         self.pool      = nn.AdaptiveAvgPool2d(1)
@@ -135,6 +136,35 @@ class DRPBlock(nn.Module):
         embedding: (B, out_dim)
         """
         mask = self.roi_mask(feature_map)
+        if self.training and not hasattr(self, "_vis_mask"):
+
+            self._vis_mask = True
+
+            self.visualizer.save_mask(
+                mask[0],
+                "08_roi_mask.png",
+            )
         self.last_mask = mask.detach()
-        pooled = self.pool(self.reweight(feature_map, mask)).flatten(1)
+        if self.training and not hasattr(self, "_vis_overlay"):
+
+            self._vis_overlay = True
+
+            self.visualizer.save_overlay(
+                self.last_input[0],
+                mask[0],
+                "09_roi_overlay.png",
+            )
+        weighted = self.reweight(feature_map, mask)
+
+        if self.training and not hasattr(self, "_vis_weighted"):
+
+            self._vis_weighted = True
+
+            self.visualizer.save_featuremap(
+                weighted[0],
+                "10_reweighted.png",
+                "Reweighted Feature Map",
+            )
+
+        pooled = self.pool(weighted).flatten(1)
         return self.proj(pooled)

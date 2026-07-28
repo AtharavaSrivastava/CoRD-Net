@@ -16,8 +16,8 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from models.dual_intensity import DualIntensityStem
+from utils.visualizer import ModelVisualizer
 
 
 class EdgeGatedResidualBlock(nn.Module):
@@ -39,6 +39,7 @@ class EdgeGatedResidualBlock(nn.Module):
 
     def __init__(self, channels: int) -> None:
         super().__init__()
+        self.visualizer = ModelVisualizer()
         self.dw_conv   = nn.Conv2d(channels, channels, 3, padding=1,
                                    groups=channels, bias=False)
         self.pw_conv   = nn.Conv2d(channels, channels, 1, bias=False)
@@ -237,39 +238,27 @@ class CompartmentBranchModule(nn.Module):
             fused_feat, medial_feat, lateral_feat
         """
         medial_crop, lateral_crop = self._split_compartments(global_crop)
-        if self.training and not hasattr(self, "_crop_debug"):
-            self._crop_debug = True
+        if self.training and not hasattr(self, "_vis_compartment"):
 
-            from pathlib import Path
-            import matplotlib.pyplot as plt
+            self._vis_compartment = True
 
-            Path("results/debug").mkdir(parents=True, exist_ok=True)
+            self.visualizer.save_image(
+                global_crop[0],
+                "05_global.png",
+                "Global",
+            )
 
-            images = {
-                "global": global_crop[0],
-                "medial": medial_crop[0],
-                "lateral": lateral_crop[0],
-            }
+            self.visualizer.save_image(
+                medial_crop[0],
+                "06_medial.png",
+                "Medial",
+            )
 
-            # Undo ImageNet normalization
-            mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-            std  = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-
-            for name, img in images.items():
-                img = img.detach().cpu()
-
-                mean_cpu = mean.cpu()
-                std_cpu = std.cpu()
-
-                img = img * std_cpu + mean_cpu
-                img = img.clamp(0, 1)
-
-                plt.figure(figsize=(5, 5))
-                plt.imshow(img.permute(1, 2, 0))
-                plt.axis("off")
-                plt.title(name.capitalize())
-                plt.savefig(f"results/debug/{name}.png", dpi=200, bbox_inches="tight")
-                plt.close()
+            self.visualizer.save_image(
+                lateral_crop[0],
+                "07_lateral.png",
+                "Lateral",
+            )
         m = self.compartment_branch(medial_crop)
         l = self.compartment_branch(lateral_crop)
 
