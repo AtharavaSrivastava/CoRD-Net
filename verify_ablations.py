@@ -206,7 +206,7 @@ def verify_experiment(exp: str, device: torch.device, verbose: bool) -> VerifyRe
     l_= torch.randn(B, 3, H, H, device=device) if use_3crop else None
 
     try:
-        preds = model(g, m, l_)
+        preds = model(g)
     except Exception as e:
         errors.append(f"FORWARD ERROR: {e}")
         return VerifyResult(

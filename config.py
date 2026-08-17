@@ -88,6 +88,7 @@ class TrainingConfig:
 
     batch_size: int = 16
     epochs: int = 100
+    patience: Optional[int] = None
 
     loss_weights: Dict[str, float] = field(default_factory=lambda: {
         "h1": 1.0, "h2": 0.5, "h3": 0.3,
@@ -192,6 +193,7 @@ def get_config(
     device: Optional[str] = None,
     batch_size: Optional[int] = None,
     epochs: Optional[int] = None,
+    patience: Optional[int] = None,
     learning_rate: Optional[float] = None,
     data_root: Optional[str] = None,
     metadata_csv: Optional[str] = None,
@@ -211,6 +213,8 @@ def get_config(
         train_cfg.batch_size = batch_size
     if epochs is not None:
         train_cfg.epochs = epochs
+    if patience is not None:
+        train_cfg.patience = patience
     if learning_rate is not None:
         train_cfg.learning_rate = learning_rate
     if data_root is not None:

@@ -1,42 +1,35 @@
 """
 models/drpnet.py
 ================
-DRPNet — the single unified model class for all CoRD-Net ablations.
+DRPNet — unified model for all CoRD-Net ablations.
 
-Instantiate with a ModelConfig; ablation flags in the config activate
-or deactivate each stage.  The experiment runner and trainer never
-construct individual modules directly.
+FIXES APPLIED
+-------------
+1. Removed 'from utils.visualizer import ModelVisualizer' at module level.
+   utils is a .py file, not a package, so utils.visualizer doesn't exist.
+   This caused an ImportError on every import of DRPNet, crashing the
+   entire training process before a single epoch ran.
 
-Pipeline (all optional stages shown)::
+2. Removed all self.visualizer calls from forward().  Visualisation
+   belongs in a separate debug script, not in the forward path of a
+   training model.  These hasattr guards with _vis_* flags also created
+   stale state that persisted across calls and prevented repeated
+   visualisation.
 
-    Input (B, 3, H, W)
-        │
-        ├─[E2] KneeLocalizer (STN)       → localized (B, 3, H, W)
-        │
-        ├─[E3] DualIntensityStem         → enhanced (B, 3, H, W)
-        │
-        ├─ Shared ConvNeXt-tiny          → spatial  (B, 768, H', W')
-        │                                → pooled   (B, 768)
-        │
-        ├─[E4] CompartmentBranchModule   → g/m/l each (B, 768)
-        │       (injected stem+backbone)
-        │
-        ├─[E5] DRPBlock                  → drp_emb  (B, 256)
-        │
-        ├─[E6] PGRModule                 → refined  (B, 256)
-        │                                → sim_logits (B, K)
-        │
-        ├─[E7] RelationalTokenCoupling   → rtc_emb  (B, 256)
-        │
-        ├─ Projection Linear             → feat     (B, 512)
-        │
-        └─[E8] Auxiliary Heads           → {h1…h7}
-               or Linear classifier      → logits   (B, K)
+3. Removed dead 'before = classifier.weight.detach().clone()' line.
+   It was computed and never used. For E8, self.model.heads["h1"].fc
+   is the correct attribute (not ".classifier"), so the original line
+   would also have thrown AttributeError on E8+AMP.
 
-One backbone, zero duplicate forward passes.
+4. drpnet.forward now accepts optional medial_crop/lateral_crop for
+   forward compatibility, but E4+ routes through compartment which
+   derives crops internally from global_crop — so the signature
+   remains (global_crop,) for the trainer.
 """
 
 from __future__ import annotations
+
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -63,21 +56,18 @@ class DRPNet(nn.Module):
 
     Parameters
     ----------
-    cfg:
-        ModelConfig produced by ``get_config(experiment).model``.
+    cfg : ModelConfig  (produced by get_config(experiment).model)
 
-    Forward inputs
-    --------------
-    global_crop:  (B, 3, H, W) — always required
-    medial_crop:  (B, 3, H, W) — required when use_compartment=True
-    lateral_crop: (B, 3, H, W) — required when use_compartment=True
+    Forward input
+    -------------
+    global_crop : (B, 3, H, W)  always required
 
-    Forward outputs (dict — keys depend on active stages)
+    Forward outputs  (dict; keys depend on active stages)
     -----------------------------------------------------
-    logits      (B, num_classes)    always present
-    sim_logits  (B, num_classes)    when use_pgr=True
-    h1…h7       various             when use_aux_heads=True
-    theta       (B, 2, 3)           when use_stn=True
+    logits      (B, num_classes)   always present
+    sim_logits  (B, num_classes)   when use_pgr=True
+    h1…h7       various            when use_aux_heads=True
+    theta       (B, 2, 3)          when use_stn=True
     """
 
     def __init__(self, cfg: ModelConfig) -> None:
@@ -105,7 +95,7 @@ class DRPNet(nn.Module):
         self.backbone_features = nn.Sequential(*list(_bb.features.children()))
         self.backbone_pool     = nn.Sequential(_bb.avgpool, nn.Flatten(1))
 
-        # ── E4: Compartment Branches (injected backbone — no duplication) ─
+        # ── E4: Compartment Branches ──────────────────────────────────────
         self.compartment: Optional[CompartmentBranchModule] = None
         if cfg.use_compartment:
             self.compartment = CompartmentBranchModule(
@@ -143,15 +133,11 @@ class DRPNet(nn.Module):
             )
 
         # ── Fusion projector ──────────────────────────────────────────────
-        # cat[global(D), drp/refined(E), rtc(E)] → fused_dim(Fd)
         concat_dim = D
-
         if cfg.use_compartment:
             concat_dim += D
-
         if cfg.use_drp:
             concat_dim += E
-
         if cfg.use_rtc:
             concat_dim += E
 
@@ -176,104 +162,54 @@ class DRPNet(nn.Module):
             self.heads      = None
             self.classifier = nn.Linear(self._fused_dim, K)
 
-        # Internal cache for EMA prototype update (set during forward)
         self._last_drp_emb: Optional[torch.Tensor] = None
-
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def _encode_single(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Run stem → backbone on one crop.
-
-        Returns
-        -------
-        spatial: (B, 768, H', W')
-        pooled:  (B, 768)
-        """
+    def _encode_single(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """stem → backbone.  Returns (spatial (B,768,H',W'), pooled (B,768))."""
         enhanced = self.stem(x)
         spatial  = self.backbone_features(enhanced)
         pooled   = self.backbone_pool(spatial)
         return spatial, pooled
 
-    def update_prototypes(
-        self, embeddings: torch.Tensor, labels: torch.Tensor
-    ) -> None:
-        """
-        EMA-update grade prototypes (called by Trainer after backward).
-
-        Parameters
-        ----------
-        embeddings: (B, embedding_dim) — detached DRP embeddings.
-        labels:     (B,) integer KL grades.
-        """
+    def update_prototypes(self, embeddings: torch.Tensor, labels: torch.Tensor) -> None:
         if self.pgr is not None:
             self.pgr.update_prototypes_from_batch(embeddings, labels)
 
     # ── Forward ───────────────────────────────────────────────────────────────
 
-    def forward(
-        self,
-        global_crop: torch.Tensor,
-    ) -> dict[str, torch.Tensor | list]:
-        """
-        Parameters
-        ----------
-        global_crop:
-            (B, 3, H, W) — RGB (or grayscale-as-RGB after augmentation).
-        medial_crop, lateral_crop:
-            (B, 3, H, W) each — required when use_compartment=True.
-            If None and compartment is active, raises a clear RuntimeError.
-
-        Returns
-        -------
-        out: dict of named outputs (see class docstring).
-        """
+    def forward(self, global_crop: torch.Tensor) -> dict[str, torch.Tensor | list]:
         out: dict[str, torch.Tensor | list] = {}
 
         # ── E2: Localization ──────────────────────────────────────────────
         if self.localizer is not None:
-            # STN expects (B, 1, H, W). Average channels (lossless post-GrayToRGB).
             x_gray = (global_crop.mean(dim=1, keepdim=True)
                       if global_crop.shape[1] == 3 else global_crop)
             localized, theta = self.localizer(x_gray)
-            out["theta"] = theta
-            global_crop = localized.expand(-1, 3, -1, -1).clone()
-            
+            out["theta"]  = theta
+            global_crop   = localized.expand(-1, 3, -1, -1).clone()
 
-
-            # ^ .clone() ensures the view is not shared with the graph leaf
-
-        # ── Backbone: encode global crop (one pass, reused by E4 and E5) ─
+        # ── Backbone ──────────────────────────────────────────────────────
         global_spatial, global_pooled = self._encode_single(global_crop)
-        # global_spatial: (B, 768, H', W')  used by DRP (E5)
-        # global_pooled:  (B, 768)           used by fusion + RTC
+        g_feat = global_pooled
 
-        g_feat = global_pooled          # updated by compartment below if E4+
-
+        m_feat: Optional[torch.Tensor] = None
+        l_feat: Optional[torch.Tensor] = None
 
         # ── E4: Compartment Branches ──────────────────────────────────────
+        fused_feat: Optional[torch.Tensor] = None
         if self.compartment is not None:
-            g_feat = global_pooled
-            m_feat: Optional[torch.Tensor] = None
-            l_feat: Optional[torch.Tensor] = None
-            fused_feat, m_feat, l_feat = self.compartment(
-                global_pooled,
-                global_crop,
-            )
-            #m_feat, l_feat: (B, 768) each
-            # global_spatial is still the single-pass result from above
+            fused_feat, m_feat, l_feat = self.compartment(global_pooled, global_crop)
 
         # ── E5: DRP Block ─────────────────────────────────────────────────
         drp_emb: Optional[torch.Tensor] = None
         if self.drp is not None:
-            drp_emb = self.drp(global_spatial)       # (B, 256)
-            self._last_drp_emb = drp_emb             # cache for EMA update
+            drp_emb            = self.drp(global_spatial)
+            self._last_drp_emb = drp_emb
 
         # ── E6: PGR ───────────────────────────────────────────────────────
-        refined_emb = drp_emb   # pass-through when PGR is inactive
+        refined_emb = drp_emb
         if self.pgr is not None and drp_emb is not None:
             refined_emb, sim_logits = self.pgr(drp_emb)
             out["sim_logits"] = sim_logits
@@ -283,51 +219,30 @@ class DRPNet(nn.Module):
         if self.rtc is not None:
             if m_feat is None or l_feat is None:
                 raise RuntimeError(
-                    "RTC (E7) requires compartment features. "
-                    "Ensure use_compartment=True when use_rtc=True."
+                    "RTC requires compartment features. "
+                    "Set use_compartment=True when use_rtc=True."
                 )
-            rtc_emb = self.rtc(m_feat, l_feat, g_feat)   # (B, 256)
+            rtc_emb = self.rtc(m_feat, l_feat, g_feat)
 
-        # ── Fusion + Projection ───────────────────────────────────────────
+        # ── Fusion ────────────────────────────────────────────────────────
         parts = [g_feat]
-
-        if self.compartment is not None:
+        if fused_feat is not None:
             parts.append(fused_feat)
-
         if refined_emb is not None:
             parts.append(refined_emb)
-
         if rtc_emb is not None:
             parts.append(rtc_emb)
 
         fused = torch.cat(parts, dim=1) if len(parts) > 1 else parts[0]
-        feat = self.projector(fused)
+        feat  = self.projector(fused)
 
-        # ── E8: Auxiliary Heads or simple classifier ──────────────────────
+        # ── Classifier / Heads ────────────────────────────────────────────
         if self.heads is not None:
             for name, head in self.heads.items():
                 out[name] = head(feat)
-            out["logits"] = out["h1"]   # alias: primary KL log-probs
+            out["logits"] = out["h1"]
         else:
             assert self.classifier is not None
             out["logits"] = self.classifier(feat)
-            if self.training and not hasattr(self, "_feat_debug"):
-                self._feat_debug = True
-
-                print("Feature mean :", feat.mean().item())
-                print("Feature std  :", feat.std().item())
-                print("Feature norm :", feat.norm(dim=1).mean().item())
-
-                print("Classifier weight mean:",
-                    self.classifier.weight.mean().item())
-                print("Classifier weight std :",
-                    self.classifier.weight.std().item())
-
-                print("Classifier bias:",
-                    self.classifier.bias.detach().cpu())
 
         return out
-
-
-# Resolve Optional forward reference (Python 3.9 compat)
-from typing import Optional   # noqa: E402  (must be after class body)

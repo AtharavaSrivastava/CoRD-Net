@@ -395,6 +395,23 @@ def _resolve_splits(
 # Public DataLoader builders
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _worker_init_fn(worker_id: int) -> None:
+    """
+    Seed numpy's RNG per DataLoader worker.
+
+    PyTorch automatically seeds its own RNG per worker, but numpy's global
+    RNG is NOT automatically reseeded.  Without this, any transform that
+    calls np.random (e.g. CLAHE's cv2 internals) gets the same numpy state
+    across workers, producing correlated noise and non-reproducible runs.
+
+    FIX: derive a per-worker numpy seed from PyTorch's already-seeded
+    worker seed so both RNGs are deterministic and independent per worker.
+    """
+    import numpy as np
+    seed = torch.initial_seed() % (2 ** 32)
+    np.random.seed(seed)
+
+
 def _make_loader(
     samples:   List[_Sample],
     cfg_model: ModelConfig,
@@ -405,11 +422,13 @@ def _make_loader(
     ds = OAIDataset(samples, cfg_model, cfg_train, split=split)
     return DataLoader(
         ds,
-        batch_size  = cfg_train.batch_size,
-        shuffle     = shuffle,
-        num_workers = cfg_train.num_workers,
-        pin_memory  = cfg_train.pin_memory,
-        drop_last   = (split == "train"),
+        batch_size      = cfg_train.batch_size,
+        shuffle         = shuffle,
+        num_workers     = cfg_train.num_workers,
+        pin_memory      = cfg_train.pin_memory,
+        drop_last       = (split == "train"),
+        worker_init_fn  = _worker_init_fn,          # FIX: seed numpy per worker
+        persistent_workers = cfg_train.num_workers > 0,
     )
 
 
