@@ -111,6 +111,8 @@ class TrainingConfig:
     results_dir: str = "results"
     save_every: int = 10
 
+    sampler: str = "none"            # 'none' | 'weighted'
+
     # ── Dataset paths (set via CLI; no hardcoded paths) ───────────────────
     data_root: Optional[str] = None
     """Root directory of the OAI dataset (required for real training)."""

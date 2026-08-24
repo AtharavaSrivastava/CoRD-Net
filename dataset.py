@@ -406,10 +406,21 @@ def _make_loader(
     ds = OAIDataset(samples, cfg_model, cfg_train, split=split)
 
     sampler = None
-    if split == "train":
+
+    if split == "train" and getattr(cfg_train, "sampler", "none") == "weighted":
         counts = Counter(s.kl for s in samples)
-        sample_weights = [1.0 / counts[s.kl] for s in samples]
-        sampler = WeightedRandomSampler(sample_weights, num_samples=len(samples), replacement=True)
+
+        sample_weights = [
+            1.0 / counts[s.kl]
+            for s in samples
+        ]
+
+        sampler = WeightedRandomSampler(
+            sample_weights,
+            num_samples=len(samples),
+            replacement=True
+        )
+
         shuffle = False
 
     return DataLoader(
