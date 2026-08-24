@@ -109,6 +109,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--test-csv",       type=str, default=None,
                    help="Mode 3: CSV for test split only")
     p.add_argument("--epochs",         type=int, default=None)
+    p.add_argument("--patience",       type=int, default=None,
+                   help="Early stopping patience epochs based on val QWK")
     p.add_argument("--batch-size",     type=int, default=None)
     p.add_argument("--lr",             type=float, default=None)
     p.add_argument("--device",         type=str, default=None)
@@ -157,6 +159,8 @@ def main() -> None:
 
     cfg.training.sampler = args.sampler
 
+    if args.patience is not None:
+        cfg.training.patience = args.patience
     if args.train_csv:
         cfg.training.train_csv = args.train_csv
     if args.val_csv:

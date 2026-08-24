@@ -110,6 +110,7 @@ class TrainingConfig:
     log_dir: str = "logs"
     results_dir: str = "results"
     save_every: int = 10
+    patience: Optional[int] = None    # None = disable early stopping
 
     sampler: str = "none"            # 'none' | 'weighted'
 

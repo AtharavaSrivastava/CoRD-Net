@@ -500,6 +500,7 @@ class Trainer:
         )
 
         train_losses: Dict[str, float] = {}
+        patience_counter = 0
 
         for epoch in range(start_epoch, self.tcfg.epochs + 1):
             self.epoch = epoch
@@ -521,9 +522,14 @@ class Trainer:
                 val_metrics = self.val_epoch(val_loader)
                 log_parts  += [f"val/{k}={v:.4f}" for k, v in val_metrics.items()]
                 val_total   = val_metrics.get("total", float("inf"))
-            if val_metrics.get("kappa",-1.0) > self.best_qwk:
-                self.best_qwk = val_metrics["kappa"]
+
+            val_qwk = val_metrics.get("kappa", -1.0)
+            if val_qwk > self.best_qwk:
+                self.best_qwk = val_qwk
+                patience_counter = 0
                 self._save(epoch, train_losses, val_metrics, tag="best")
+            else:
+                patience_counter += 1
 
             logger.info(" | ".join(log_parts))
 
@@ -543,6 +549,11 @@ class Trainer:
 
             if epoch % self.tcfg.save_every == 0:
                 self._save(epoch, train_losses, tag=f"epoch{epoch:04d}")
+
+            if self.tcfg.patience is not None and patience_counter >= self.tcfg.patience:
+                logger.info("Early stopping triggered at epoch %d (no val QWK improvement for %d epochs).", epoch, patience_counter)
+                print(f"Early stopping at epoch {epoch}")
+                break
 
         # Final checkpoint
         self._save(self.epoch, train_losses, tag="final")
