@@ -21,7 +21,6 @@ import logging
 
 from config import get_config, EXPERIMENT_NAMES
 from dataset import build_loaders, build_test_loader
-from losses import MultiTaskLoss
 from models.drpnet import DRPNet
 from trainer import Trainer
 from utils import get_device, seed_everything, setup_logging
@@ -60,6 +59,9 @@ def parse_args() -> argparse.Namespace:
                    help="Root directory for evaluation output (default: results)")
     p.add_argument("--num-workers",    type=int, default=None)
     p.add_argument("--amp",            action="store_true")
+    p.add_argument("--loss-type", type=str, default="weighted_ce",
+                   choices=["ce", "weighted_ce", "focal", "soft_qwk"],
+                   help="Primary-head loss for E1-E7 (default: weighted_ce)")
     return p.parse_args()
 
 
@@ -104,6 +106,8 @@ def main() -> None:
     logger.info("  Results dir : %s", args.results_dir)
     logger.info("═" * 62)
 
+    from losses import MultiTaskLoss, build_primary_loss
+
     train_loader, val_loader = build_loaders(cfg)
     test_loader              = build_test_loader(cfg)
 
@@ -111,7 +115,12 @@ def main() -> None:
     loss_fn = (
         MultiTaskLoss(cfg.training)
         if cfg.model.use_aux_heads
-        else __import__("torch").nn.CrossEntropyLoss()
+        else build_primary_loss(
+            args.loss_type,
+            train_loader.dataset.samples,
+            cfg.model.num_classes,
+            cfg.training.device or "cuda",
+        )
     )
 
     trainer = Trainer(model, loss_fn, cfg)

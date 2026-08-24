@@ -21,6 +21,7 @@ principle.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Dict, List, Optional
 
 import torch
@@ -28,6 +29,56 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from config import TrainingConfig
+
+
+def compute_class_weights(samples, num_classes: int, beta: float = 0.999) -> torch.Tensor:
+    """Class-Balanced weights (Cui et al. 2019) — gentler than raw inverse frequency."""
+    counts = Counter(s.kl for s in samples)
+    counts_t = torch.tensor([counts.get(i, 1) for i in range(num_classes)], dtype=torch.float)
+    effective_num = 1.0 - torch.pow(torch.tensor(beta), counts_t)
+    weights = (1.0 - beta) / effective_num
+    return weights / weights.sum() * num_classes
+
+
+class FocalLoss(nn.Module):
+    def __init__(self, alpha: torch.Tensor, gamma: float = 2.0, label_smoothing: float = 0.1):
+        super().__init__()
+        self.alpha, self.gamma, self.label_smoothing = alpha, gamma, label_smoothing
+
+    def forward(self, logits, targets):
+        ce = F.cross_entropy(logits, targets, weight=self.alpha,
+                              label_smoothing=self.label_smoothing, reduction="none")
+        pt = torch.exp(-ce)
+        return (((1 - pt) ** self.gamma) * ce).mean()
+
+
+class SoftQWKLoss(nn.Module):
+    def __init__(self, num_classes: int = 5):
+        super().__init__()
+        i, j = torch.meshgrid(torch.arange(num_classes), torch.arange(num_classes), indexing="ij")
+        self.register_buffer("weight_matrix", ((i - j) ** 2).float())
+
+    def forward(self, logits, targets):
+        probs = torch.softmax(logits, dim=1)
+        targets_onehot = F.one_hot(targets, probs.size(1)).float()
+        O = probs.T @ targets_onehot
+        hist_pred, hist_true = probs.sum(0), targets_onehot.sum(0)
+        E = torch.outer(hist_pred, hist_true) / probs.size(0)
+        return (self.weight_matrix * O).sum() / ((self.weight_matrix * E).sum() + 1e-6)
+
+
+def build_primary_loss(loss_type: str, samples, num_classes: int, device) -> nn.Module:
+    """Factory for E1–E7's primary loss. loss_type: 'ce' | 'weighted_ce' | 'focal' | 'soft_qwk'."""
+    if loss_type == "ce":
+        return nn.CrossEntropyLoss(label_smoothing=0.1)
+    weights = compute_class_weights(samples, num_classes).to(device)
+    if loss_type == "weighted_ce":
+        return nn.CrossEntropyLoss(weight=weights, label_smoothing=0.1)
+    if loss_type == "focal":
+        return FocalLoss(alpha=weights, gamma=2.0, label_smoothing=0.1)
+    if loss_type == "soft_qwk":
+        return SoftQWKLoss(num_classes=num_classes)
+    raise ValueError(f"Unknown loss_type: {loss_type}")
 
 
 class MultiTaskLoss(nn.Module):

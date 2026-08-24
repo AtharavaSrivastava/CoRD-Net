@@ -39,6 +39,7 @@ four split modes.
 
 from __future__ import annotations
 
+from collections import Counter
 import csv
 import logging
 from pathlib import Path
@@ -46,7 +47,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 
 from augmentation import get_train_transforms, get_val_transforms
 from config import Config, ModelConfig, TrainingConfig
@@ -403,10 +404,19 @@ def _make_loader(
     shuffle:   bool,
 ) -> DataLoader:
     ds = OAIDataset(samples, cfg_model, cfg_train, split=split)
+
+    sampler = None
+    if split == "train":
+        counts = Counter(s.kl for s in samples)
+        sample_weights = [1.0 / counts[s.kl] for s in samples]
+        sampler = WeightedRandomSampler(sample_weights, num_samples=len(samples), replacement=True)
+        shuffle = False
+
     return DataLoader(
         ds,
         batch_size  = cfg_train.batch_size,
         shuffle     = shuffle,
+        sampler     = sampler,
         num_workers = cfg_train.num_workers,
         pin_memory  = cfg_train.pin_memory,
         drop_last   = (split == "train"),
