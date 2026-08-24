@@ -109,7 +109,11 @@ class OAIDataset(Dataset):
         self.cfg_train  = cfg_train
         self.split      = split
         self.transform  = transform or (
-            get_train_transforms(cfg_model) if split == "train"
+            get_train_transforms(
+                cfg_model,
+                getattr(cfg_train, "augmentation", "standard"),
+            )
+            if split == "train"
             else get_val_transforms(cfg_model)
         )
 

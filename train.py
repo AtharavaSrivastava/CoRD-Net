@@ -137,6 +137,13 @@ def parse_args() -> argparse.Namespace:
         choices=["none", "weighted"],
         help="Training sampler: none or weighted"
     )
+    p.add_argument(
+        "--augmentation",
+        type=str,
+        default="standard",
+        choices=["standard", "mild", "none"],
+        help="Training augmentation strength"
+    )
     return p.parse_args()
 
 
@@ -158,6 +165,7 @@ def main() -> None:
     )
 
     cfg.training.sampler = args.sampler
+    cfg.training.augmentation = args.augmentation
 
     if args.patience is not None:
         cfg.training.patience = args.patience
@@ -215,9 +223,14 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     experiment_config = {
+        "experiment": args.exp,
         "seed": args.seed,
         "loss_type": args.loss_type,
         "sampler": args.sampler,
+        "augmentation": args.augmentation,
+        "epochs": cfg.training.epochs,
+        "patience": cfg.training.patience,
+        "batch_size": cfg.training.batch_size,
         "num_classes": cfg.model.num_classes,
         "use_aux_heads": cfg.model.use_aux_heads,
     }

@@ -113,6 +113,7 @@ class TrainingConfig:
     patience: Optional[int] = None    # None = disable early stopping
 
     sampler: str = "none"            # 'none' | 'weighted'
+    augmentation: str = "standard"   # 'standard' | 'mild' | 'none'
 
     # ── Dataset paths (set via CLI; no hardcoded paths) ───────────────────
     data_root: Optional[str] = None

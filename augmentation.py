@@ -54,8 +54,38 @@ class AddGaussianNoise:
         return torch.clamp(tensor + torch.randn_like(tensor) * sigma, 0.0, 1.0)
 
 
-def get_train_transforms(cfg: ModelConfig) -> transforms.Compose:
-    """Return the training augmentation pipeline from cfg."""
+def get_mild_train_transforms(cfg: ModelConfig) -> transforms.Compose:
+    """Return mild training augmentation pipeline."""
+    return transforms.Compose([
+        CLAHE(clip_limit=2.0),
+        transforms.RandomRotation(degrees=5),
+        transforms.RandomAffine(degrees=0, translate=(0.03, 0.03), scale=(0.95, 1.05)),
+        GrayToRGB(),
+        transforms.ColorJitter(brightness=0.08, contrast=0.08),
+        transforms.Resize((cfg.image_size, cfg.image_size)),
+        transforms.ToTensor(),
+        AddGaussianNoise(sigma_min=0.005, sigma_max=0.015),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+
+
+def get_none_train_transforms(cfg: ModelConfig) -> transforms.Compose:
+    """Return clean / no-augmentation pipeline for training."""
+    return transforms.Compose([
+        CLAHE(clip_limit=2.0),
+        GrayToRGB(),
+        transforms.Resize((cfg.image_size, cfg.image_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+
+
+def get_train_transforms(cfg: ModelConfig, mode: str = "standard") -> transforms.Compose:
+    """Return the training augmentation pipeline from cfg based on mode."""
+    if mode == "mild":
+        return get_mild_train_transforms(cfg)
+    if mode == "none":
+        return get_none_train_transforms(cfg)
     return transforms.Compose([
         CLAHE(clip_limit=2.0),
         transforms.RandomRotation(degrees=10),
