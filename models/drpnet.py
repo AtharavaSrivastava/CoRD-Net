@@ -217,21 +217,22 @@ class DRPNet(nn.Module):
     def forward(
         self,
         global_crop: torch.Tensor,
+        return_debug_crops: bool = False,
     ) -> dict[str, torch.Tensor | list]:
         """
         Parameters
         ----------
         global_crop:
             (B, 3, H, W) — RGB (or grayscale-as-RGB after augmentation).
-        medial_crop, lateral_crop:
-            (B, 3, H, W) each — required when use_compartment=True.
-            If None and compartment is active, raises a clear RuntimeError.
+        return_debug_crops:
+            If True, populates intermediate spatial crops (_debug_stn_crop, etc.) in out dict.
 
         Returns
         -------
         out: dict of named outputs (see class docstring).
         """
         out: dict[str, torch.Tensor | list] = {}
+        want_debug_crops = return_debug_crops or getattr(self, "debug_mode", False)
 
         # ── E2: Localization ──────────────────────────────────────────────
         if self.localizer is not None:
@@ -241,9 +242,8 @@ class DRPNet(nn.Module):
             localized, theta = self.localizer(x_gray)
             out["theta"] = theta
             global_crop = localized.expand(-1, 3, -1, -1).clone()
-            out["_debug_stn_crop"] = global_crop.detach()
-            
-
+            if want_debug_crops:
+                out["_debug_stn_crop"] = global_crop.detach()
 
             # ^ .clone() ensures the view is not shared with the graph leaf
 
@@ -260,9 +260,10 @@ class DRPNet(nn.Module):
             g_feat = global_pooled
             m_feat: Optional[torch.Tensor] = None
             l_feat: Optional[torch.Tensor] = None
-            medial_crop, lateral_crop = self.compartment._split_compartments(global_crop)
-            out["_debug_medial_crop"] = medial_crop.detach()
-            out["_debug_lateral_crop"] = lateral_crop.detach()
+            if want_debug_crops:
+                medial_crop, lateral_crop = self.compartment._split_compartments(global_crop)
+                out["_debug_medial_crop"] = medial_crop.detach()
+                out["_debug_lateral_crop"] = lateral_crop.detach()
             fused_feat, m_feat, l_feat = self.compartment(
                 global_pooled,
                 global_crop,

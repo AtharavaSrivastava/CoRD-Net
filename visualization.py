@@ -86,7 +86,7 @@ class GradCAM:
         # Enable gradient computation locally for visualization even during eval
         input_tensor = input_tensor.clone().requires_grad_(True)
         with torch.enable_grad():
-            preds = self.model(input_tensor)
+            preds = self.model(input_tensor, return_debug_crops=True)
             logits = preds["logits"]
             score = logits[0, target_class]
             score.backward()
