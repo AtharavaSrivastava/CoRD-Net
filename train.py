@@ -140,7 +140,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--augmentation",
         type=str,
-        default="standard",
+        default="mild",
         choices=["standard", "mild", "none"],
         help="Training augmentation strength"
     )

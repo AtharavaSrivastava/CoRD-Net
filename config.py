@@ -49,7 +49,7 @@ class ModelConfig:
     stn_img_size: int = 512
 
     # Compartments (E4)
-    compartment_overlap = 0.10
+    compartment_overlap: float = 0.10
 
     # PGR (E6)
     prototype_temperature: float = 0.07
@@ -113,7 +113,7 @@ class TrainingConfig:
     patience: Optional[int] = None    # None = disable early stopping
 
     sampler: str = "none"            # 'none' | 'weighted'
-    augmentation: str = "standard"   # 'standard' | 'mild' | 'none'
+    augmentation: str = "mild"       # 'standard' | 'mild' | 'none'
 
     # ── Dataset paths (set via CLI; no hardcoded paths) ───────────────────
     data_root: Optional[str] = None
@@ -151,27 +151,91 @@ class TrainingConfig:
 # ──────────────────────────────────────────────────────────────────────────────
 
 _EXPERIMENT_FLAGS: Dict[str, Tuple[str, Dict[str, bool]]] = {
-    "e1": ("Baseline ConvNeXt", {}),
-    "e2": ("ConvNeXt + Auto-Localization (STN)",
-           {"use_stn": True}),
-    "e3": ("E2 + Dual-Intensity Stem",
-           {"use_stn": True, "use_dual_intensity": True}),
-    "e4": ("E3 + Compartment Branches",
-           {"use_stn": True, "use_dual_intensity": True, "use_compartment": True}),
-    "e5": ("E4 + Soft ROI Mask (DRP Block)",
-           {"use_stn": True, "use_dual_intensity": True,
-            "use_compartment": True, "use_drp": True}),
-    "e6": ("E5 + Prototype-Guided Refinement",
-           {"use_stn": True, "use_dual_intensity": True,
-            "use_compartment": True, "use_drp": True, "use_pgr": True}),
-    "e7": ("E6 + Relational Token Coupling",
-           {"use_stn": True, "use_dual_intensity": True,
-            "use_compartment": True, "use_drp": True,
-            "use_pgr": True, "use_rtc": True}),
-    "e8": ("Full DRP + Auxiliary Heads",
-           {"use_stn": True, "use_dual_intensity": True,
-            "use_compartment": True, "use_drp": True,
-            "use_pgr": True, "use_rtc": True, "use_aux_heads": True}),
+    "e1": (
+        "Baseline ConvNeXt",
+        {}
+    ),
+
+    "e2": (
+        "ConvNeXt + Auto-Localization (STN)",
+        {
+            "use_stn": True,
+            "use_dual_intensity": False,
+        }
+    ),
+
+    "e2m": (
+        "E2 + Mild Augmentation",
+        {
+            "use_stn": True,
+            "use_dual_intensity": False,
+        }
+    ),
+
+    # Separate ablation only
+    "e3": (
+        "E2 + Dual-Intensity Stem",
+        {
+            "use_stn": True,
+            "use_dual_intensity": True,
+        }
+    ),
+
+    # Main progression starts from E2, NOT E3
+    "e4": (
+        "E2 + Compartment Branches",
+        {
+            "use_stn": True,
+            "use_dual_intensity": False,
+            "use_compartment": True,
+        }
+    ),
+
+    "e5": (
+        "E4 + DRP Block",
+        {
+            "use_stn": True,
+            "use_dual_intensity": False,
+            "use_compartment": True,
+            "use_drp": True,
+        }
+    ),
+
+    "e6": (
+        "E5 + Prototype-Guided Refinement",
+        {
+            "use_stn": True,
+            "use_dual_intensity": False,
+            "use_compartment": True,
+            "use_drp": True,
+            "use_pgr": True,
+        }
+    ),
+
+    "e7": (
+        "E6 + Relational Token Coupling",
+        {
+            "use_stn": True,
+            "use_dual_intensity": False,
+            "use_compartment": True,
+            "use_drp": True,
+            "use_pgr": True,
+            "use_rtc": True,
+        }
+    ),
+
+    "e8": (
+        "E7 + Auxiliary Heads",
+        {
+            "use_stn": True,
+            "use_dual_intensity": False,
+            "use_compartment": True,
+            "use_drp": True,
+            "use_pgr": True,
+            "use_rtc": True,
+            "use_aux_heads": True,
+        }
+    ),
 }
 
 EXPERIMENT_NAMES: Dict[str, str] = {k: v[0] for k, v in _EXPERIMENT_FLAGS.items()}

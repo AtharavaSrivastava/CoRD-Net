@@ -557,6 +557,12 @@ class Trainer:
 
         # Final checkpoint
         self._save(self.epoch, train_losses, tag="final")
+        
+        best_ckpt_path = Path(self.tcfg.checkpoint_dir) / f"{self.cfg.experiment}_best.pt"
+        if best_ckpt_path.exists():
+            logger.info("Restoring best model checkpoint (val_qwk=%.4f) from %s for evaluation...", self.best_qwk, best_ckpt_path)
+            load_checkpoint(best_ckpt_path, self.model, device=self.device)
+
         logger.info("Training complete. Generating reports …")
 
         # ── Post-training reporting ─────────────────────────────────────────

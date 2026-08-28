@@ -61,6 +61,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--num-workers",   type=int, default=4)
     p.add_argument("--log-dir",       type=str, default="logs")
     p.add_argument("--results-dir",   type=str, default="results")
+    p.add_argument("--visualize",     action="store_true",
+                   help="Generate and save Grad-CAM heatmaps and STN/compartment crop visualizations")
     return p.parse_args()
 
 
@@ -130,6 +132,18 @@ def main() -> None:
         parameters    = count_parameters(model),
         results_dir   = args.results_dir,
     )
+
+    if args.visualize:
+        from visualization import run_visualizations
+        vis_loader = test_loader if test_loader is not None else val_loader
+        if vis_loader is not None:
+            run_visualizations(
+                model=model,
+                loader=vis_loader,
+                device=device,
+                output_dir=writer.root,
+                max_samples=15,
+            )
 
 
 if __name__ == "__main__":

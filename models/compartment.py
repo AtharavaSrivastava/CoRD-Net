@@ -186,45 +186,50 @@ class CompartmentBranchModule(nn.Module):
         stem: nn.Module,
         backbone_features: nn.Module,
         feature_dim: int = 768,
+        overlap: float = 0.10,
+        debug_visualization: bool = False,
     ) -> None:
         super().__init__()
+        self.overlap = overlap
+        self.debug_visualization = debug_visualization
         self.compartment_branch = _EncoderBranch(
             stem,
             backbone_features,
             feature_dim
         )
         self.fusion = CompartmentFusion(feature_dim)
+
     def _split_compartments(
-            self,
-            x: torch.Tensor,
-        ) -> tuple[torch.Tensor, torch.Tensor]:
-            """
-            Split a full knee image into overlapping medial and lateral crops.
-            """
+        self,
+        x: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Split a full knee image into overlapping medial and lateral crops.
+        """
 
-            _, _, h, w = x.shape
+        _, _, h, w = x.shape
 
-            overlap = int(0.10 * w)
-            mid = w // 2
+        overlap = int(self.overlap * w)
+        mid = w // 2
 
-            medial = x[:, :, :, :mid + overlap]
-            lateral = x[:, :, :, mid - overlap:]
+        medial = x[:, :, :, :mid + overlap]
+        lateral = x[:, :, :, mid - overlap:]
 
-            medial = F.interpolate(
-                medial,
-                size=(h, w),
-                mode="bilinear",
-                align_corners=False,
-            )
+        medial = F.interpolate(
+            medial,
+            size=(h, w),
+            mode="bilinear",
+            align_corners=False,
+        )
 
-            lateral = F.interpolate(
-                lateral,
-                size=(h, w),
-                mode="bilinear",
-                align_corners=False,
-            )
+        lateral = F.interpolate(
+            lateral,
+            size=(h, w),
+            mode="bilinear",
+            align_corners=False,
+        )
 
-            return medial, lateral
+        return medial, lateral
 
     def forward(
         self,
@@ -237,7 +242,11 @@ class CompartmentBranchModule(nn.Module):
             fused_feat, medial_feat, lateral_feat
         """
         medial_crop, lateral_crop = self._split_compartments(global_crop)
-        if self.training and not hasattr(self, "_crop_debug"):
+        if (
+            self.training
+            and self.debug_visualization
+            and not hasattr(self, "_crop_debug")
+        ):
             self._crop_debug = True
 
             from pathlib import Path

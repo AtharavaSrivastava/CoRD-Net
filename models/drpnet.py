@@ -241,6 +241,7 @@ class DRPNet(nn.Module):
             localized, theta = self.localizer(x_gray)
             out["theta"] = theta
             global_crop = localized.expand(-1, 3, -1, -1).clone()
+            out["_debug_stn_crop"] = global_crop.detach()
             
 
 
@@ -259,6 +260,9 @@ class DRPNet(nn.Module):
             g_feat = global_pooled
             m_feat: Optional[torch.Tensor] = None
             l_feat: Optional[torch.Tensor] = None
+            medial_crop, lateral_crop = self.compartment._split_compartments(global_crop)
+            out["_debug_medial_crop"] = medial_crop.detach()
+            out["_debug_lateral_crop"] = lateral_crop.detach()
             fused_feat, m_feat, l_feat = self.compartment(
                 global_pooled,
                 global_crop,
