@@ -157,6 +157,7 @@ def compute_fgbf_metrics(
     prec = precision_score(sub_labels, sub_preds, average=None, **kw)
     rec = recall_score(sub_labels, sub_preds, average=None, **kw)
     f1 = f1_score(sub_labels, sub_preds, average=None, **kw)
+    cm = confusion_matrix(sub_labels, sub_preds, labels=[0, 1, 2])
 
     return {
         "fgbf_low_grade_accuracy": float(accuracy_score(sub_labels, sub_preds)),
@@ -169,6 +170,8 @@ def compute_fgbf_metrics(
         "fgbf_kl2_precision": float(prec[2]),
         "fgbf_kl2_recall": float(rec[2]),
         "fgbf_kl2_f1": float(f1[2]),
+        "fgbf_boundary_KL1_to_KL0": int(cm[1, 0]),
+        "fgbf_boundary_KL1_to_KL2": int(cm[1, 2]),
     }
 
 

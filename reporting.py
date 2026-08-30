@@ -563,6 +563,9 @@ def print_final_results(
                         m.get("fgbf_kl1_precision", 0), m.get("fgbf_kl1_recall", 0), m.get("fgbf_kl1_f1", 0))
             logger.info("    KL2 Prec/Rec/F1    : %.4f / %.4f / %.4f",
                         m.get("fgbf_kl2_precision", 0), m.get("fgbf_kl2_recall", 0), m.get("fgbf_kl2_f1", 0))
+            logger.info("    FGBF Boundary Errors:")
+            logger.info("      KL1 -> KL0       : %d", m.get("fgbf_boundary_KL1_to_KL0", 0))
+            logger.info("      KL1 -> KL2       : %d", m.get("fgbf_boundary_KL1_to_KL2", 0))
 
     sep = "=" * 52
     logger.info(sep)

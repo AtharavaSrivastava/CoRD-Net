@@ -158,7 +158,7 @@ class DRPNet(nn.Module):
         # cat[global(D), fgbf(fgbf_feature_dim), compartment(D), drp/refined(E), rtc(E)] → fused_dim(Fd)
         concat_dim = D
 
-        if cfg.use_fgbf:
+        if cfg.use_fgbf and cfg.fgbf_fuse_main:
             concat_dim += cfg.fgbf_feature_dim
 
         if cfg.use_compartment:
@@ -324,7 +324,7 @@ class DRPNet(nn.Module):
         # ── Fusion + Projection ───────────────────────────────────────────
         parts = [g_feat]
 
-        if fgbf_feature is not None:
+        if fgbf_feature is not None and self.cfg.fgbf_fuse_main:
             parts.append(fgbf_feature)
 
         if self.compartment is not None:

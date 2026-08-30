@@ -163,6 +163,37 @@ class Trainer:
         labels = {k: v.to(self.device, non_blocking=True) for k, v in labels.items()}
         return global_crop, labels
 
+    # ── Gradient norm helpers ──────────────────────────────────────────────────
+
+    def _fgbf_gradient_norm(self) -> float:
+        if not hasattr(self.model, "fgbf") or self.model.fgbf is None:
+            return 0.0
+
+        total = 0.0
+        count = 0
+
+        for param in self.model.fgbf.parameters():
+            if param.grad is not None:
+                total += param.grad.detach().norm().item() ** 2
+                count += 1
+
+        return total ** 0.5 if count > 0 else 0.0
+
+    def _backbone_gradient_norm(self) -> float:
+        backbone = getattr(self.model, "backbone_features", None)
+        if backbone is None:
+            return 0.0
+
+        total = 0.0
+        count = 0
+
+        for param in backbone.parameters():
+            if param.grad is not None:
+                total += param.grad.detach().norm().item() ** 2
+                count += 1
+
+        return total ** 0.5 if count > 0 else 0.0
+
     # ── Loss computation ──────────────────────────────────────────────────────
 
     def _compute_loss(
@@ -183,7 +214,7 @@ class Trainer:
                     "Check DRPNet.forward() for this experiment."
                 )
             ce = self.loss_fn(preds["logits"], labels["kl"])
-            loss_dict = {"kl": ce, "total": ce}
+            loss_dict = {"kl": ce, "main": ce, "total": ce}
 
         if "sim_logits" in preds:
             w          = self.tcfg.loss_weights.get("proto", 0.3)
@@ -204,6 +235,9 @@ class Trainer:
 
             w_fgbf = getattr(self.cfg.model, "fgbf_loss_weight", 0.15)
             loss_dict["fgbf"] = fgbf_ce
+            loss_dict["fgbf_loss"] = fgbf_ce
+            loss_dict["weighted_fgbf"] = w_fgbf * fgbf_ce
+            loss_dict["weighted_fgbf_loss"] = w_fgbf * fgbf_ce
             loss_dict["total"] = loss_dict["total"] + w_fgbf * fgbf_ce
 
         return loss_dict
@@ -233,13 +267,10 @@ class Trainer:
 
         if self.scaler:
             self.scaler.scale(total).backward()
-            classifier = self.model.classifier
-            if classifier is None:
-                classifier = self.model.heads["h1"].fc   # adjust if needed
-
-            before = classifier.weight.detach().clone()
+            self.scaler.unscale_(self.optimizer)
+            fgbf_grad = self._fgbf_gradient_norm()
+            bb_grad = self._backbone_gradient_norm()
             if self.tcfg.gradient_clip > 0:
-                self.scaler.unscale_(self.optimizer)
                 nn.utils.clip_grad_norm_(
                     self.model.parameters(), self.tcfg.gradient_clip
                 )
@@ -247,6 +278,8 @@ class Trainer:
             self.scaler.update()
         else:
             total.backward()
+            fgbf_grad = self._fgbf_gradient_norm()
+            bb_grad = self._backbone_gradient_norm()
             if self.tcfg.gradient_clip > 0:
                 nn.utils.clip_grad_norm_(
                     self.model.parameters(), self.tcfg.gradient_clip
@@ -259,14 +292,13 @@ class Trainer:
             if drp_emb is not None:
                 self.model.update_prototypes(drp_emb.detach(), labels["kl"])
         out = {k: v.item() for k, v in loss_kv.items()}
+        out["fgbf_grad_norm"] = fgbf_grad
+        out["backbone_grad_norm"] = bb_grad
         out["correct"] = correct
         out["count"] = count
-    
-        # ADD THIS
+
         out["logits_mean"] = preds["logits"].detach().mean(dim=0).cpu()
 
-        out["correct"] = correct
-        out["count"] = count
         return out
 
     # ── Epoch loops ───────────────────────────────────────────────────────────
@@ -331,6 +363,7 @@ class Trainer:
         totals: Dict[str, float] = {}
         all_logits: List[torch.Tensor] = []
         all_labels: List[torch.Tensor] = []
+        all_fgbf_logits: List[torch.Tensor] = []
 
         n = 0
         pred_hist = torch.zeros(self.cfg.model.num_classes, dtype=torch.long)
@@ -366,6 +399,8 @@ class Trainer:
             if "logits" in preds:
                 all_logits.append(logits.cpu())
                 all_labels.append(labels["kl"].cpu())
+            if "fgbf_logits" in preds:
+                all_fgbf_logits.append(preds["fgbf_logits"].cpu())
 
             n += 1
 
@@ -374,6 +409,7 @@ class Trainer:
         if all_logits:
             logits_cat = torch.cat(all_logits, dim=0)
             labels_cat = torch.cat(all_labels, dim=0)
+            fgbf_cat   = torch.cat(all_fgbf_logits, dim=0) if all_fgbf_logits else None
 
             m = evaluate(
                 logits_cat,
@@ -386,8 +422,11 @@ class Trainer:
                 logits_cat,
                 labels_cat,
                 self.cfg.model.num_classes,
+                fgbf_logits=fgbf_cat,
             )
             result["macro_f1"] = full["macro_f1"]
+            if fgbf_cat is not None:
+                result.update({k: v for k, v in full.items() if k.startswith("fgbf_")})
 
             label_hist = torch.bincount(
                 labels_cat,
