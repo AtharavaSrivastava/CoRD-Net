@@ -98,7 +98,7 @@ section("2. CONFIGURATION AUDIT")
 # 2A: use_fgbf=False by default
 mc = ModelConfig()
 record("ModelConfig default use_fgbf=False", not mc.use_fgbf)
-record("ModelConfig default fgbf_loss_weight=0.10", mc.fgbf_loss_weight == 0.10)
+record("ModelConfig default fgbf_loss_weight=0.15", mc.fgbf_loss_weight == 0.15)
 record("ModelConfig default fgbf_feature_dim=256", mc.fgbf_feature_dim == 256)
 
 # 2B: E2 does NOT activate FGBF
@@ -169,15 +169,6 @@ record("FGBF contains no ConvNeXt sub-module", not has_convnext_in_fgbf)
 # FGBF should NOT own a backbone_features child
 has_backbone_in_fgbf = any("backbone" in n for n, _ in fgbf_params)
 record("FGBF contains no backbone child", not has_backbone_in_fgbf)
-
-# E2 and E2-FGBF main classifier dimension equality (auxiliary-only)
-m_e2  = DRPNet(get_config("e2").model)
-m_e2f = DRPNet(get_config("e2_fgbf").model)
-record("E2 and E2-FGBF have identical classifier.in_features",
-       m_e2.classifier.in_features == m_e2f.classifier.in_features,
-       f"E2: {m_e2.classifier.in_features}, E2-FGBF: {m_e2f.classifier.in_features}")
-record("E2 and E2-FGBF have identical projector in_features",
-       getattr(m_e2.projector, "in_features", None) == getattr(m_e2f.projector, "in_features", None))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

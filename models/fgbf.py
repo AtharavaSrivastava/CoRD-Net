@@ -71,28 +71,15 @@ class FineGrainedBoundaryFeatureModule(nn.Module):
         # Learnable spatial prior scale
         self.prior_scale = nn.Parameter(torch.tensor(1.0))
 
-        # 3. Lightweight boundary detail pathway (3x3 depthwise + 1x1 point + BN + GELU)
-        self.boundary_path = nn.Sequential(
-            nn.Conv2d(reduced_dim, reduced_dim, kernel_size=3, padding=1, groups=reduced_dim, bias=False),
-            nn.BatchNorm2d(reduced_dim),
-            nn.GELU(),
-            nn.Conv2d(reduced_dim, reduced_dim, kernel_size=1, bias=False),
-            nn.BatchNorm2d(reduced_dim),
-            nn.GELU(),
-        )
-        self.detail_attn_net = nn.Sequential(
-            nn.Conv2d(reduced_dim, 1, kernel_size=1),
-        )
-
-        # 4. Fusion projection layer: concat(global(256), medial(256), lateral(256), detail(256)) = 1024 -> 256
+        # 3. Fusion projection layer: concat(global(256), medial(256), lateral(256)) = 768 -> 256
         self.projection = nn.Sequential(
-            nn.Linear(reduced_dim * 4, reduced_dim),
+            nn.Linear(reduced_dim * 3, reduced_dim),
             nn.LayerNorm(reduced_dim),
             nn.GELU(),
             nn.Dropout(p=dropout),
         )
 
-        # 5. KL0/KL1/KL2 refinement classifier head
+        # 4. KL0/KL1/KL2 refinement classifier head
         self.low_grade_head = nn.Sequential(
             nn.Linear(reduced_dim, 128),
             nn.GELU(),
@@ -183,22 +170,14 @@ class FineGrainedBoundaryFeatureModule(nn.Module):
         medial_feature = (reduced_features * medial_attention).sum(dim=(-2, -1)) / medial_sum.squeeze(-1).squeeze(-1)   # (B, 256)
         lateral_feature = (reduced_features * lateral_attention).sum(dim=(-2, -1)) / lateral_sum.squeeze(-1).squeeze(-1) # (B, 256)
 
-        # Step 4: Lightweight boundary detail pathway with spatial attention
-        detail_features = self.boundary_path(reduced_features)               # (B, 256, H, W)
-        detail_attn = torch.sigmoid(self.detail_attn_net(detail_features))   # (B, 1, H, W)
-        weighted_detail = detail_features * detail_attn                      # (B, 256, H, W)
-        detail_sum = detail_attn.sum(dim=(-2, -1), keepdim=True) + self.eps   # (B, 1, 1, 1)
-        detail_feature = (weighted_detail.sum(dim=(-2, -1)) /
-                          detail_sum.squeeze(-1).squeeze(-1))                # (B, 256)
-
-        # Step 5: Fusion of global average pool + medial + lateral + detail features
+        # Step 4: Fusion of global average pool + medial + lateral features
         global_feature = F.adaptive_avg_pool2d(reduced_features, (1, 1)).flatten(1)  # (B, 256)
-        local_feature = torch.cat([medial_feature, lateral_feature, detail_feature], dim=1) # (B, 768)
-        fused = torch.cat([global_feature, local_feature], dim=1)                     # (B, 1024)
+        local_feature = torch.cat([medial_feature, lateral_feature], dim=1)           # (B, 512)
+        fused = torch.cat([global_feature, local_feature], dim=1)                     # (B, 768)
 
         boundary_feature = self.projection(fused)  # (B, 256)
 
-        # Step 6: Refinement head for [KL0, KL1, KL2]
+        # Step 5: Refinement head for [KL0, KL1, KL2]
         low_grade_logits = self.low_grade_head(boundary_feature)  # (B, 3)
 
         # Defensive output shape checks

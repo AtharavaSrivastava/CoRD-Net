@@ -66,7 +66,7 @@ class ModelConfig:
     fgbf_feature_dim: int = 256
     fgbf_hidden_dim: int = 128
     fgbf_dropout: float = 0.1
-    fgbf_loss_weight: float = 0.10
+    fgbf_loss_weight: float = 0.15
     fgbf_fuse_main: bool = False
 
     # Ablation flags — set by get_config(experiment)
