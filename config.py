@@ -62,9 +62,16 @@ class ModelConfig:
     rtc_dropout: float = 0.1
     rtc_use_global_context: bool = True
 
+    # FGBF Module Parameters
+    fgbf_feature_dim: int = 256
+    fgbf_hidden_dim: int = 128
+    fgbf_dropout: float = 0.1
+    fgbf_loss_weight: float = 0.15
+
     # Ablation flags — set by get_config(experiment)
     use_stn: bool = False
     use_dual_intensity: bool = False
+    use_fgbf: bool = False
     use_compartment: bool = False
     use_drp: bool = False
     use_pgr: bool = False
@@ -171,6 +178,23 @@ _EXPERIMENT_FLAGS: Dict[str, Tuple[str, Dict[str, bool]]] = {
             "use_dual_intensity": False,
         }
     ),
+    "e1_fgbf": (
+        "E1 + Fine-Grained Boundary Feature Module",
+        {
+            "use_stn": False,
+            "use_dual_intensity": False,
+            "use_fgbf": True,
+        }
+    ),
+
+    "e2_fgbf": (
+        "E2 + Fine-Grained Boundary Feature Module",
+        {
+            "use_stn": True,
+            "use_dual_intensity": False,
+            "use_fgbf": True,
+        }
+    ),
 
     # Separate ablation only
     "e3": (
@@ -178,6 +202,15 @@ _EXPERIMENT_FLAGS: Dict[str, Tuple[str, Dict[str, bool]]] = {
         {
             "use_stn": True,
             "use_dual_intensity": True,
+        }
+    ),
+
+    "e3_fgbf": (
+        "E3 + Fine-Grained Boundary Feature Module",
+        {
+            "use_stn": True,
+            "use_dual_intensity": True,
+            "use_fgbf": True,
         }
     ),
 
@@ -264,7 +297,7 @@ def get_config(
     data_root: Optional[str] = None,
     metadata_csv: Optional[str] = None,
 ) -> Config:
-    """Return a fully-merged Config for *experiment* (e1 … e8)."""
+    """Return a fully-merged Config for *experiment* (e1 … e8, e2_fgbf, e3_fgbf)."""
     if experiment not in _EXPERIMENT_FLAGS:
         raise ValueError(
             f"Unknown experiment '{experiment}'. "

@@ -464,6 +464,64 @@ def update_ablation_summary(
 #  Final results console print
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _save_fgbf_confusion_matrix(
+    fgbf_logits: np.ndarray,
+    labels: np.ndarray,
+    split: str,
+    writer: ResultsWriter,
+) -> None:
+    labels_np = _to_numpy(labels).astype(int)
+    mask = (labels_np <= 2)
+    if not mask.any():
+        return
+
+    sub_logits = fgbf_logits[mask]
+    sub_labels = labels_np[mask]
+    sub_preds = sub_logits.argmax(axis=1)
+
+    cm3x3 = confusion_matrix(sub_labels, sub_preds, labels=[0, 1, 2])
+    kl3 = ["KL0", "KL1", "KL2"]
+
+    # ── PNG ────────────────────────────────────────────────────────────────
+    fig, ax = plt.subplots(figsize=(5, 4))
+    im = ax.imshow(cm3x3, interpolation="nearest", cmap="Purples")
+    plt.colorbar(im, ax=ax)
+
+    ax.set_xticks(range(3))
+    ax.set_yticks(range(3))
+    ax.set_xticklabels(kl3, fontsize=10)
+    ax.set_yticklabels(kl3, fontsize=10)
+    ax.set_xlabel("FGBF Predicted Label", fontsize=11)
+    ax.set_ylabel("True Label", fontsize=11)
+    ax.set_title(f"FGBF Auxiliary Confusion Matrix — {split.capitalize()} Split", fontsize=11)
+
+    thresh = cm3x3.max() / 2.0 if cm3x3.max() > 0 else 1.0
+    for i in range(3):
+        for j in range(3):
+            ax.text(j, i, str(cm3x3[i, j]),
+                    ha="center", va="center", fontsize=10,
+                    color="white" if cm3x3[i, j] > thresh else "black")
+
+    plt.tight_layout()
+    png_path = writer.path(f"{split}_fgbf_confusion_matrix.png")
+    fig.savefig(png_path, dpi=_DPI, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Saved %s", png_path)
+
+    # ── CSV ────────────────────────────────────────────────────────────────
+    csv_path = writer.path(f"{split}_fgbf_confusion_matrix.csv")
+    with open(csv_path, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["true\\pred"] + kl3)
+        for i, row in enumerate(cm3x3):
+            w.writerow([kl3[i]] + row.tolist())
+    logger.info("Saved %s", csv_path)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Final results console print
+# ══════════════════════════════════════════════════════════════════════════════
+
 def print_final_results(
     train_metrics: Dict[str, float],
     val_metrics:   Dict[str, float],
@@ -473,7 +531,7 @@ def print_final_results(
 
     def _block(split: str, m: Dict[str, float]) -> None:
         logger.info("%s", split.upper())
-        logger.info("  Accuracy           : %.4f", m.get("accuracy",           float("nan")))
+        logger.info("  Overall Accuracy   : %.4f", m.get("accuracy",           float("nan")))
         logger.info("  Macro Precision    : %.4f", m.get("macro_precision",    float("nan")))
         logger.info("  Macro Recall       : %.4f", m.get("macro_recall",       float("nan")))
         logger.info("  Macro F1           : %.4f", m.get("macro_f1",           float("nan")))
@@ -484,6 +542,27 @@ def print_final_results(
             logger.info("  MAE                : %.4f", m["mae"])
         if "qwk" in m:
             logger.info("  QWK                : %.4f", m["qwk"])
+
+        if "kl1_recall" in m:
+            logger.info("  KL0 Recall         : %.4f", m.get("kl0_recall", float("nan")))
+            logger.info("  KL1 Recall         : %.4f", m.get("kl1_recall", float("nan")))
+            logger.info("  KL1 F1             : %.4f", m.get("kl1_f1",     float("nan")))
+            logger.info("  KL2 Recall         : %.4f", m.get("kl2_recall", float("nan")))
+            logger.info("  Boundary Error Counts:")
+            logger.info("    KL1 -> KL0       : %d", m.get("boundary_KL1_to_KL0", 0))
+            logger.info("    KL1 -> KL2       : %d", m.get("boundary_KL1_to_KL2", 0))
+            logger.info("    KL0 -> KL1       : %d", m.get("boundary_KL0_to_KL1", 0))
+            logger.info("    KL2 -> KL1       : %d", m.get("boundary_KL2_to_KL1", 0))
+
+        if "fgbf_low_grade_accuracy" in m:
+            logger.info("  FGBF Diagnostics (Auxiliary Head):")
+            logger.info("    FGBF Low-Grade Acc : %.4f", m["fgbf_low_grade_accuracy"])
+            logger.info("    KL0 Prec/Rec/F1    : %.4f / %.4f / %.4f",
+                        m.get("fgbf_kl0_precision", 0), m.get("fgbf_kl0_recall", 0), m.get("fgbf_kl0_f1", 0))
+            logger.info("    KL1 Prec/Rec/F1    : %.4f / %.4f / %.4f",
+                        m.get("fgbf_kl1_precision", 0), m.get("fgbf_kl1_recall", 0), m.get("fgbf_kl1_f1", 0))
+            logger.info("    KL2 Prec/Rec/F1    : %.4f / %.4f / %.4f",
+                        m.get("fgbf_kl2_precision", 0), m.get("fgbf_kl2_recall", 0), m.get("fgbf_kl2_f1", 0))
 
     sep = "=" * 52
     logger.info(sep)
@@ -513,45 +592,29 @@ def generate_all_reports(
     num_classes:  int,
     parameters:   int,
     results_dir:  str = "results",
+    val_fgbf_logits: Optional[np.ndarray] = None,
+    test_fgbf_logits: Optional[np.ndarray] = None,
+    train_fgbf_logits: Optional[np.ndarray] = None,
 ) -> Dict[str, Dict[str, float]]:
     """
     Generate every output file for one experiment.
-
-    Parameters
-    ----------
-    writer:        ResultsWriter for this experiment.
-    history:       Dict of per-epoch lists from Trainer.history.
-    train_logits:  (N, K) logits from final training-set pass, or None.
-    train_labels:  (N,)   integer labels for training set, or None.
-    val_logits:    (N, K) logits from validation set.
-    val_labels:    (N,)   integer labels for validation set.
-    test_logits:   (N, K) logits from test set, or None.
-    test_labels:   (N,)   integer labels for test set, or None.
-    num_classes:   Number of KL grades (5).
-    parameters:    Total trainable parameter count.
-    results_dir:   Root results directory for ablation summary.
-
-    Returns
-    -------
-    Dict {"train": {...}, "val": {...}, "test": {...}} of metric dicts.
     """
-    logger.info("Generating reports for experiment '%s' …",
-                writer.experiment)
+    logger.info("Generating reports for experiment '%s' …", writer.experiment)
 
     # ── Compute all metrics ───────────────────────────────────────────────
     val_preds,   val_probs   = get_predictions(val_logits)
     val_labels_np            = _to_numpy(val_labels).astype(int)
 
-    val_metrics   = compute_all_metrics(val_logits,   val_labels, num_classes)
+    val_metrics   = compute_all_metrics(val_logits, val_labels, num_classes, fgbf_logits=val_fgbf_logits)
 
     train_metrics: Dict[str, float] = {}
     if train_logits is not None and train_labels is not None:
-        train_metrics = compute_all_metrics(train_logits, train_labels, num_classes)
+        train_metrics = compute_all_metrics(train_logits, train_labels, num_classes, fgbf_logits=train_fgbf_logits)
 
     test_metrics:  Dict[str, float] = {}
     test_preds  = test_probs = test_labels_np = None
     if test_logits is not None and test_labels is not None:
-        test_metrics      = compute_all_metrics(test_logits, test_labels, num_classes)
+        test_metrics      = compute_all_metrics(test_logits, test_labels, num_classes, fgbf_logits=test_fgbf_logits)
         test_preds, test_probs = get_predictions(test_logits)
         test_labels_np         = _to_numpy(test_labels).astype(int)
 
@@ -569,6 +632,12 @@ def generate_all_reports(
         _save_confusion_matrix(
             test_labels_np, test_preds, num_classes, "test", writer
         )
+
+    # ── FGBF 3x3 Confusion matrices (if FGBF active) ─────────────────────
+    if val_fgbf_logits is not None:
+        _save_fgbf_confusion_matrix(val_fgbf_logits, val_labels_np, "val", writer)
+    if test_fgbf_logits is not None and test_labels_np is not None:
+        _save_fgbf_confusion_matrix(test_fgbf_logits, test_labels_np, "test", writer)
 
     # ── Classification reports ────────────────────────────────────────────
     _save_classification_report(

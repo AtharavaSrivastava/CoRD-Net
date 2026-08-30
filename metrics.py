@@ -23,7 +23,7 @@ get_predictions(logits) -> Tuple[np.ndarray, np.ndarray]
 
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import torch
@@ -117,41 +117,91 @@ def mean_absolute_error(
 # Full metric suite
 # ──────────────────────────────────────────────────────────────────────────────
 
+def compute_fgbf_metrics(
+    fgbf_logits: torch.Tensor | np.ndarray,
+    labels: torch.Tensor | np.ndarray,
+) -> Dict[str, float]:
+    """
+    Compute FGBF auxiliary diagnostic metrics over low-grade samples (KL0, KL1, KL2).
+
+    Parameters
+    ----------
+    fgbf_logits: (N, 3) raw logits for KL0, KL1, KL2.
+    labels: (N,) ground-truth KL grades.
+
+    Returns
+    -------
+    Dict containing:
+      fgbf_low_grade_accuracy
+      fgbf_kl0_precision, fgbf_kl0_recall, fgbf_kl0_f1
+      fgbf_kl1_precision, fgbf_kl1_recall, fgbf_kl1_f1
+      fgbf_kl2_precision, fgbf_kl2_recall, fgbf_kl2_f1
+    """
+    logits_np = _to_numpy(fgbf_logits)
+    labels_np = _to_numpy(labels).astype(int)
+
+    mask = (labels_np <= 2)
+    if not mask.any():
+        return {
+            "fgbf_low_grade_accuracy": 0.0,
+            "fgbf_kl0_precision": 0.0, "fgbf_kl0_recall": 0.0, "fgbf_kl0_f1": 0.0,
+            "fgbf_kl1_precision": 0.0, "fgbf_kl1_recall": 0.0, "fgbf_kl1_f1": 0.0,
+            "fgbf_kl2_precision": 0.0, "fgbf_kl2_recall": 0.0, "fgbf_kl2_f1": 0.0,
+        }
+
+    sub_logits = logits_np[mask]
+    sub_labels = labels_np[mask]
+    sub_preds = sub_logits.argmax(axis=1)
+
+    kw = dict(labels=[0, 1, 2], zero_division=0)
+    prec = precision_score(sub_labels, sub_preds, average=None, **kw)
+    rec = recall_score(sub_labels, sub_preds, average=None, **kw)
+    f1 = f1_score(sub_labels, sub_preds, average=None, **kw)
+
+    return {
+        "fgbf_low_grade_accuracy": float(accuracy_score(sub_labels, sub_preds)),
+        "fgbf_kl0_precision": float(prec[0]),
+        "fgbf_kl0_recall": float(rec[0]),
+        "fgbf_kl0_f1": float(f1[0]),
+        "fgbf_kl1_precision": float(prec[1]),
+        "fgbf_kl1_recall": float(rec[1]),
+        "fgbf_kl1_f1": float(f1[1]),
+        "fgbf_kl2_precision": float(prec[2]),
+        "fgbf_kl2_recall": float(rec[2]),
+        "fgbf_kl2_f1": float(f1[2]),
+    }
+
+
 def compute_all_metrics(
     logits: torch.Tensor | np.ndarray,
     labels: torch.Tensor | np.ndarray,
     num_classes: int = 5,
+    fgbf_logits: Optional[torch.Tensor | np.ndarray] = None,
 ) -> Dict[str, float]:
     """
-    Compute the full 9-metric suite from raw logits and integer labels.
-
-    Metrics
-    -------
-    accuracy
-    macro_precision
-    macro_recall
-    macro_f1
-    weighted_precision
-    weighted_recall
-    weighted_f1
-    mae
-    qwk
+    Compute the full metric suite from raw logits and integer labels.
 
     Parameters
     ----------
     logits: (N, num_classes) raw model output scores.
     labels: (N,) integer ground-truth KL grades.
+    fgbf_logits: Optional (N, 3) FGBF auxiliary logits.
 
     Returns
     -------
-    Dict[str, float] — all keys listed above.
+    Dict[str, float] containing all metrics.
     """
     preds, _ = get_predictions(logits)
     l        = _to_numpy(labels).astype(int)
     kl_labels = list(range(num_classes))
     kw        = dict(labels=kl_labels, zero_division=0)
 
-    return {
+    rec_per_class  = recall_score(l, preds, average=None, **kw)
+    f1_per_class   = f1_score(l, preds, average=None, **kw)
+
+    cm = confusion_matrix(l, preds, labels=kl_labels)
+
+    metrics: Dict[str, float] = {
         "accuracy":           float(accuracy_score(l, preds)),
         "macro_precision":    float(precision_score(l, preds, average="macro",  **kw)),
         "macro_recall":       float(recall_score(   l, preds, average="macro",  **kw)),
@@ -161,7 +211,23 @@ def compute_all_metrics(
         "weighted_f1":        float(f1_score(       l, preds, average="weighted", **kw)),
         "mae":                float(sklearn_mae(l, preds)),
         "qwk":                quadratic_kappa(preds, l, num_classes),
+        # Class-specific metrics for low-grade boundary error analysis
+        "kl0_recall":         float(rec_per_class[0]) if num_classes > 0 else 0.0,
+        "kl1_recall":         float(rec_per_class[1]) if num_classes > 1 else 0.0,
+        "kl1_f1":             float(f1_per_class[1])  if num_classes > 1 else 0.0,
+        "kl2_recall":         float(rec_per_class[2]) if num_classes > 2 else 0.0,
+        # Key boundary error counts from 5x5 confusion matrix
+        "boundary_KL1_to_KL0": int(cm[1, 0]) if num_classes > 1 else 0,
+        "boundary_KL1_to_KL2": int(cm[1, 2]) if num_classes > 2 else 0,
+        "boundary_KL0_to_KL1": int(cm[0, 1]) if num_classes > 1 else 0,
+        "boundary_KL2_to_KL1": int(cm[2, 1]) if num_classes > 2 else 0,
     }
+
+    if fgbf_logits is not None:
+        fgbf_m = compute_fgbf_metrics(fgbf_logits, labels)
+        metrics.update(fgbf_m)
+
+    return metrics
 
 
 # ──────────────────────────────────────────────────────────────────────────────

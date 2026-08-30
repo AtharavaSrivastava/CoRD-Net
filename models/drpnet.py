@@ -38,6 +38,7 @@ One backbone, zero duplicate forward passes.
 
 from __future__ import annotations
 
+from typing import Optional, Dict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -47,6 +48,7 @@ from torchvision.models import ConvNeXt_Tiny_Weights
 from config import ModelConfig
 from models.localization import KneeLocalizer
 from models.dual_intensity import DualIntensityStem
+from models.fgbf import FineGrainedBoundaryFeatureModule
 from models.compartment import CompartmentBranchModule
 from models.roi import DRPBlock
 from models.pgr import PGRModule
@@ -105,6 +107,16 @@ class DRPNet(nn.Module):
         self.backbone_features = nn.Sequential(*list(_bb.features.children()))
         self.backbone_pool     = nn.Sequential(_bb.avgpool, nn.Flatten(1))
 
+        # ── FGBF: Fine-Grained Boundary Feature Module (Experimental Auxiliary) ─
+        self.fgbf: Optional[FineGrainedBoundaryFeatureModule] = None
+        if cfg.use_fgbf:
+            self.fgbf = FineGrainedBoundaryFeatureModule(
+                in_channels=D,
+                feature_dim=cfg.fgbf_feature_dim,
+                hidden_dim=cfg.fgbf_hidden_dim,
+                dropout=cfg.fgbf_dropout,
+            )
+
         # ── E4: Compartment Branches (injected backbone — no duplication) ─
         self.compartment: Optional[CompartmentBranchModule] = None
         if cfg.use_compartment:
@@ -143,8 +155,11 @@ class DRPNet(nn.Module):
             )
 
         # ── Fusion projector ──────────────────────────────────────────────
-        # cat[global(D), drp/refined(E), rtc(E)] → fused_dim(Fd)
+        # cat[global(D), fgbf(fgbf_feature_dim), compartment(D), drp/refined(E), rtc(E)] → fused_dim(Fd)
         concat_dim = D
+
+        if cfg.use_fgbf:
+            concat_dim += cfg.fgbf_feature_dim
 
         if cfg.use_compartment:
             concat_dim += D
@@ -247,13 +262,26 @@ class DRPNet(nn.Module):
 
             # ^ .clone() ensures the view is not shared with the graph leaf
 
-        # ── Backbone: encode global crop (one pass, reused by E4 and E5) ─
+        # ── Backbone: encode global crop (one pass, reused by E4, E5, FGBF) ─
         global_spatial, global_pooled = self._encode_single(global_crop)
-        # global_spatial: (B, 768, H', W')  used by DRP (E5)
+        # global_spatial: (B, 768, H', W')  used by DRP (E5) and FGBF
         # global_pooled:  (B, 768)           used by fusion + RTC
 
         g_feat = global_pooled          # updated by compartment below if E4+
 
+        # ── FGBF Auxiliary Pathway ─────────────────────────────────────────
+        fgbf_feature: Optional[torch.Tensor] = None
+        fgbf_logits: Optional[torch.Tensor] = None
+        if self.fgbf is not None:
+            fgbf_feature, fgbf_logits = self.fgbf(global_spatial)
+            out["fgbf_logits"] = fgbf_logits
+            out["fgbf_feature"] = fgbf_feature
+
+            if want_debug_crops:
+                medial_attn, lateral_attn = self.fgbf.get_last_attention_maps()
+                if medial_attn is not None and lateral_attn is not None:
+                    out["_fgbf_medial_attention"] = medial_attn.detach()
+                    out["_fgbf_lateral_attention"] = lateral_attn.detach()
 
         # ── E4: Compartment Branches ──────────────────────────────────────
         if self.compartment is not None:
@@ -296,6 +324,9 @@ class DRPNet(nn.Module):
         # ── Fusion + Projection ───────────────────────────────────────────
         parts = [g_feat]
 
+        if fgbf_feature is not None:
+            parts.append(fgbf_feature)
+
         if self.compartment is not None:
             parts.append(fused_feat)
 
@@ -332,7 +363,3 @@ class DRPNet(nn.Module):
                     self.classifier.bias.detach().cpu())
 
         return out
-
-
-# Resolve Optional forward reference (Python 3.9 compat)
-from typing import Optional   # noqa: E402  (must be after class body)

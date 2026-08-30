@@ -239,14 +239,14 @@ def main() -> None:
         json.dump(experiment_config, f, indent=2)
 
     if val_loader is not None:
-        val_logits, val_labels = trainer.collect_logits(val_loader)
+        val_logits, val_labels, val_fgbf_logits = trainer.collect_logits(val_loader)
         if len(val_labels) > 0:
             val_preds = val_logits.argmax(axis=1)
             val_class_metrics = save_class_metrics(val_labels, val_preds, output_dir, "val")
             print_per_class_summary(val_class_metrics, "val")
 
     if test_loader is not None:
-        test_logits, test_labels = trainer.collect_logits(test_loader)
+        test_logits, test_labels, test_fgbf_logits = trainer.collect_logits(test_loader)
         if len(test_labels) > 0:
             test_preds = test_logits.argmax(axis=1)
             test_class_metrics = save_class_metrics(test_labels, test_preds, output_dir, "test")

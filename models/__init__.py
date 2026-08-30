@@ -15,5 +15,6 @@ Or import individual components for unit testing::
 """
 
 from models.drpnet import DRPNet
+from models.fgbf import FineGrainedBoundaryFeatureModule
 
-__all__ = ["DRPNet"]
+__all__ = ["DRPNet", "FineGrainedBoundaryFeatureModule"]

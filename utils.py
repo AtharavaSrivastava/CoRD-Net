@@ -148,6 +148,7 @@ def load_checkpoint(
     optimizer: Optional[torch.optim.Optimizer] = None,
     scheduler=None,
     device: Optional[torch.device] = None,
+    strict: bool = True,
 ) -> Dict[str, Any]:
     """
     Load a checkpoint into *model* (and optionally *optimizer*, *scheduler*).
@@ -159,6 +160,11 @@ def load_checkpoint(
     optimizer:  If provided, optimizer state is restored.
     scheduler:  If provided, scheduler state is restored.
     device:     Map location; defaults to CPU.
+    strict:     Passed to load_state_dict.  When True (default) and keys
+                mismatch (e.g. FGBF checkpoint loaded into non-FGBF model),
+                a warning is emitted and loading retries with strict=False so
+                matching weights are still restored.  Set to False explicitly
+                to suppress the warning.
 
     Returns
     -------
@@ -175,7 +181,29 @@ def load_checkpoint(
             "Check your --resume path."
         )
     checkpoint = torch.load(fpath, map_location=device or "cpu")
-    model.load_state_dict(checkpoint["model_state_dict"])
+    if strict:
+        try:
+            model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+        except RuntimeError as exc:
+            # Graceful fallback: FGBF ↔ non-FGBF mismatch is expected when
+            # comparing experiments.  Warn, then load matching weights only.
+            missing, unexpected = [], []
+            state = checkpoint["model_state_dict"]
+            model_keys = set(model.state_dict().keys())
+            ckpt_keys  = set(state.keys())
+            missing    = sorted(model_keys - ckpt_keys)
+            unexpected = sorted(ckpt_keys  - model_keys)
+            logger.warning(
+                "load_checkpoint: strict mismatch from %s — "
+                "missing=%d key(s), unexpected=%d key(s). "
+                "Falling back to strict=False (matching weights restored). "
+                "Missing: %s  Unexpected: %s",
+                fpath.name, len(missing), len(unexpected),
+                missing[:5], unexpected[:5],
+            )
+            model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+    else:
+        model.load_state_dict(checkpoint["model_state_dict"], strict=False)
     if optimizer is not None and "optimizer_state_dict" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     if scheduler is not None and "scheduler_state_dict" in checkpoint:

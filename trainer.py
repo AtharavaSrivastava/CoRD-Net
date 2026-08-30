@@ -191,6 +191,21 @@ class Trainer:
             loss_dict["proto"] = proto_loss
             loss_dict["total"] = loss_dict["total"] + proto_loss
 
+        if "fgbf_logits" in preds:
+            kl_targets = labels["kl"]
+            low_grade_mask = (kl_targets <= 2)
+            if low_grade_mask.any():
+                fgbf_ce = F.cross_entropy(
+                    preds["fgbf_logits"][low_grade_mask],
+                    kl_targets[low_grade_mask],
+                )
+            else:
+                fgbf_ce = 0.0 * preds["fgbf_logits"].sum()
+
+            w_fgbf = getattr(self.cfg.model, "fgbf_loss_weight", 0.15)
+            loss_dict["fgbf"] = fgbf_ce
+            loss_dict["total"] = loss_dict["total"] + w_fgbf * fgbf_ce
+
         return loss_dict
 
     # ── Single training step ──────────────────────────────────────────────────
@@ -374,15 +389,15 @@ class Trainer:
             )
             result["macro_f1"] = full["macro_f1"]
 
-        label_hist = torch.bincount(
-            labels_cat,
-            minlength=self.cfg.model.num_classes,
-        )
+            label_hist = torch.bincount(
+                labels_cat,
+                minlength=self.cfg.model.num_classes,
+            )
 
-        print("\n========== VALIDATION HISTOGRAM ==========")
-        print("Pred :", pred_hist.tolist())
-        print("True :", label_hist.tolist())
-        print("==========================================\n")
+            print("\n========== VALIDATION HISTOGRAM ==========")
+            print("Pred :", pred_hist.tolist())
+            print("True :", label_hist.tolist())
+            print("==========================================\n")
 
         return result
 
@@ -391,12 +406,13 @@ class Trainer:
     @torch.no_grad()
     def collect_logits(
         self, loader: Iterator
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
 
         self.model.eval()
 
         all_logits = []
         all_labels = []
+        all_fgbf_logits = []
 
         for batch in loader:
             global_crop, labels = self._unpack_batch(batch)
@@ -411,14 +427,19 @@ class Trainer:
             if "logits" in preds:
                 all_logits.append(preds["logits"].cpu())
                 all_labels.append(labels["kl"])
+            if "fgbf_logits" in preds:
+                all_fgbf_logits.append(preds["fgbf_logits"].cpu())
 
         if not all_logits:
             empty = np.zeros((0, self.cfg.model.num_classes), dtype=np.float32)
-            return empty, np.zeros(0, dtype=np.int64)
+            return empty, np.zeros(0, dtype=np.int64), None
+
+        fgbf_np = _to_numpy(torch.cat(all_fgbf_logits, dim=0)) if all_fgbf_logits else None
 
         return (
             _to_numpy(torch.cat(all_logits, dim=0)),
             _to_numpy(torch.cat(all_labels, dim=0)).astype(int),
+            fgbf_np,
         )
 
     # ── Checkpoint ────────────────────────────────────────────────────────────
@@ -463,7 +484,7 @@ class Trainer:
             self.history = ckpt["history"]
         logger.info(
             "Resumed from epoch %d  (best_val=%.4f)",
-            self.epoch, self.best_val,
+            self.epoch, self.best_qwk,
         )
 
     # ── Main fit loop ─────────────────────────────────────────────────────────
@@ -593,30 +614,33 @@ class Trainer:
         writer = ResultsWriter(self.cfg.experiment, results_dir)
 
         logger.info("Collecting val logits …")
-        val_logits, val_labels = self.collect_logits(val_loader)
+        val_logits, val_labels, val_fgbf_logits = self.collect_logits(val_loader)
 
-        train_logits = train_labels = None
+        train_logits = train_labels = train_fgbf_logits = None
         if train_loader is not None:
             logger.info("Collecting train logits …")
-            train_logits, train_labels = self.collect_logits(train_loader)
+            train_logits, train_labels, train_fgbf_logits = self.collect_logits(train_loader)
 
 
-        test_logits = test_labels = None
+        test_logits = test_labels = test_fgbf_logits = None
         if test_loader is not None:
             logger.info("Collecting test logits …")
-            test_logits, test_labels = self.collect_logits(test_loader)
+            test_logits, test_labels, test_fgbf_logits = self.collect_logits(test_loader)
         generate_all_reports(
-            writer        = writer,
-            history       = self.history,
-            train_logits  = train_logits,
-            train_labels  = train_labels,
-            val_logits    = val_logits,
-            val_labels    = val_labels,
-            test_logits   = test_logits,
-            test_labels   = test_labels,
-            num_classes   = self.cfg.model.num_classes,
-            parameters    = count_parameters(self.model),
-            results_dir   = results_dir,
+            writer            = writer,
+            history           = self.history,
+            train_logits      = train_logits,
+            train_labels      = train_labels,
+            val_logits        = val_logits,
+            val_labels        = val_labels,
+            test_logits       = test_logits,
+            test_labels       = test_labels,
+            num_classes       = self.cfg.model.num_classes,
+            parameters        = count_parameters(self.model),
+            results_dir       = results_dir,
+            val_fgbf_logits   = val_fgbf_logits,
+            test_fgbf_logits  = test_fgbf_logits,
+            train_fgbf_logits = train_fgbf_logits,
         )
 
     # ── Synthetic stub (run_experiment.py only) ───────────────────────────────

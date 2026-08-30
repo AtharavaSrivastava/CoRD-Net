@@ -7,6 +7,12 @@ Loads a checkpoint, runs inference over the validation and/or test split,
 computes the full 9-metric suite, and writes all reports to
 results/<experiment>/.
 
+When the model has FGBF enabled (cfg.model.use_fgbf == True) the auxiliary
+3-class head logits are also collected and routed to generate_all_reports,
+which produces the 3x3 FGBF confusion matrix, per-class FGBF precision /
+recall / F1, and boundary-error counts.  The primary 5-class predictions and
+all existing metrics are never altered.
+
 Usage
 -----
     # Evaluate both val and test, write full reports
@@ -26,7 +32,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
@@ -67,22 +73,43 @@ def parse_args() -> argparse.Namespace:
 
 
 @torch.no_grad()
-def _collect(model, loader, device) -> tuple[np.ndarray, np.ndarray]:
-    """Collect (logits, labels) numpy arrays over an entire loader."""
+def _collect(
+    model,
+    loader,
+    device,
+) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    """Collect (logits, labels, fgbf_logits) over an entire loader.
+
+    Returns
+    -------
+    logits:      (N, num_classes) numpy array of 5-class raw scores.
+    labels:      (N,) integer KL grade ground truth.
+    fgbf_logits: (N, 3) numpy array of FGBF auxiliary head scores, or
+                 None when the model does not output 'fgbf_logits'.
+    """
     model.eval()
-    all_logits, all_labels = [], []
+    all_logits: list      = []
+    all_labels: list      = []
+    all_fgbf:   list      = []
+
     for batch in loader:
         crops, labels = batch
         g = crops[0].to(device)
-        m = crops[1].to(device) if len(crops) > 1 else None
-        l = crops[2].to(device) if len(crops) > 2 else None
+        # medial / lateral crops kept for models that expect them via model(g)
+        # (DRPNet forward only uses global_crop; kept for API compatibility)
         preds = model(g)
+
         all_logits.append(preds["logits"].cpu())
         all_labels.append(labels["kl"])
-    return (
-        _to_numpy(torch.cat(all_logits, dim=0)),
-        _to_numpy(torch.cat(all_labels, dim=0)).astype(int),
-    )
+
+        if "fgbf_logits" in preds:
+            all_fgbf.append(preds["fgbf_logits"].cpu())
+
+    logits_np = _to_numpy(torch.cat(all_logits, dim=0))
+    labels_np = _to_numpy(torch.cat(all_labels, dim=0)).astype(int)
+    fgbf_np   = _to_numpy(torch.cat(all_fgbf, dim=0)) if all_fgbf else None
+
+    return logits_np, labels_np, fgbf_np
 
 
 def main() -> None:
@@ -102,16 +129,17 @@ def main() -> None:
     model = DRPNet(cfg.model).to(device)
     load_checkpoint(args.checkpoint, model, device=device)
 
-    _, val_loader   = build_loaders(cfg)
-    test_loader     = build_test_loader(cfg)
+    _, val_loader = build_loaders(cfg)
+    test_loader   = build_test_loader(cfg)
 
     logger.info("Collecting logits …")
-    val_logits,  val_labels  = _collect(model, val_loader,  device)
-    test_logits, test_labels = _collect(model, test_loader, device)
+    val_logits,  val_labels,  val_fgbf_logits  = _collect(model, val_loader,  device)
+    test_logits, test_labels, test_fgbf_logits = _collect(model, test_loader, device)
 
     # Skip splits the user didn't request
     if args.split == "val":
-        test_logits = test_labels = None
+        test_logits      = test_labels      = None
+        test_fgbf_logits = None
     elif args.split == "test":
         # still pass val (required by generate_all_reports), but only
         # report test prominently
@@ -120,17 +148,20 @@ def main() -> None:
     writer = ResultsWriter(args.exp, args.results_dir)
 
     generate_all_reports(
-        writer        = writer,
-        history       = {},           # no history in standalone eval
-        train_logits  = None,
-        train_labels  = None,
-        val_logits    = val_logits,
-        val_labels    = val_labels,
-        test_logits   = test_logits,
-        test_labels   = test_labels,
-        num_classes   = cfg.model.num_classes,
-        parameters    = count_parameters(model),
-        results_dir   = args.results_dir,
+        writer            = writer,
+        history           = {},           # no history in standalone eval
+        train_logits      = None,
+        train_labels      = None,
+        val_logits        = val_logits,
+        val_labels        = val_labels,
+        test_logits       = test_logits,
+        test_labels       = test_labels,
+        num_classes       = cfg.model.num_classes,
+        parameters        = count_parameters(model),
+        results_dir       = args.results_dir,
+        val_fgbf_logits   = val_fgbf_logits,
+        test_fgbf_logits  = test_fgbf_logits,
+        train_fgbf_logits = None,
     )
 
     if args.visualize:
