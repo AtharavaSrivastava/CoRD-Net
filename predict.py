@@ -111,16 +111,7 @@ def predict_batch(
         img = Image.open(path).convert("L")
         tensor = transform(img).unsqueeze(0).to(device)   # (1, 3, H, W)
 
-        if use_compartment:
-            med_path = path.parent / (path.stem + "_MED" + path.suffix)
-            lat_path = path.parent / (path.stem + "_LAT" + path.suffix)
-            med_t  = (transform(Image.open(med_path).convert("L")).unsqueeze(0).to(device)
-                      if med_path.exists() else tensor.clone())
-            lat_t  = (transform(Image.open(lat_path).convert("L")).unsqueeze(0).to(device)
-                      if lat_path.exists() else tensor.clone())
-            preds = model(tensor, med_t, lat_t)
-        else:
-            preds = model(tensor)
+        preds = model(tensor)
 
         logits = preds["logits"]                          # (1, K)
         probs  = torch.softmax(logits, dim=1)[0]         # (K,)
